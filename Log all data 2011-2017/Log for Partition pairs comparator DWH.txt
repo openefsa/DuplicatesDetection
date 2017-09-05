@@ -1,0 +1,433 @@
+1                                                       The SAS System                            12:10 Monday, August 28, 2017
+
+1          ;*';*";*/;quit;run;
+2          OPTIONS PAGENO=MIN;
+3          %LET _CLIENTTASKLABEL='Partition pairs comparator';
+4          %LET _CLIENTPROJECTPATH='C:\Users\avonva\Desktop\Pairs on DWH.egp';
+5          %LET _CLIENTPROJECTNAME='Pairs on DWH.egp';
+6          %LET _SASPROGRAMFILE=;
+7          
+8          ODS _ALL_ CLOSE;
+9          OPTIONS DEV=ACTIVEX;
+10         GOPTIONS XPIXELS=0 YPIXELS=0;
+11         FILENAME EGSR TEMP;
+12         ODS tagsets.sasreport13(ID=EGSR) FILE=EGSR STYLE=HtmlBlue
+12       ! STYLESHEET=(URL="file:///C:/Program%20Files/SASHome/x86/SASEnterpriseGuide/5.1/Styles/HtmlBlue.css") NOGTITLE
+12       ! NOGFOOTNOTE GPATH=&sasworklocation ENCODING=UTF8 options(rolap="on");
+NOTE: Writing TAGSETS.SASREPORT13(EGSR) Body file: EGSR
+13         
+14         GOPTIONS ACCESSIBLE;
+15         
+16         /* Create the pairs. For each partition we create all the possible
+17          * pairs. The distances are also calculated there while creating pairs.
+18          * Note that it is useless to compare record 1 with record 2 and then
+19          * record 2 with record 1, since this will create a duplicate pair. The
+20          * algorithm uses an ordered dataset, in order to be able to create just
+21          * the necessary pairs. In particular, if we have 1,2,3,4,5 the algorithm
+22          * will compare: 1 with 2,3,4,5; 2 with 3,4,5; 3 with 4,5 and 4 with 5.
+23          *
+24          * Note that records with the same TRX_ID are not used to create pairs
+25          */
+26         data myLib.TRN_PAIRS;
+27         	
+28         	set myLib.&dataset nobs=size;
+29         
+30         	/* point to the next row (avoid self comparison) */
+31         	currentRow = _N_ + 1;
+32         
+33         	/* DEBUG just compute for 8040 partitions (about 150000 records)*/
+34         	/*if ( PARTITION_ID >= 8040 ) then do;
+35         		stop;
+36         	end;*/
+37         
+38         	/* Compare the current record with all the other records
+39         	 * contained in the same partition with a different TRX_ID
+40         	 */
+41         	do while( currentRow <= size );
+42         
+43         		/* point to the next record (the macro renames all the variables
+44         	     * of the other record with a "2" suffix) */
+45         		set myLib.&dataset ( %addSuffixToVariables(&vlist, 2) ) point=currentRow;
+46         
+47         		/* do not compare rows if different partition id or equal transmission id */
+48         
+49         		/* different partition => stop go to next row of data step (we have sorted by partition id
+50         		 * therefore going on with the while loop is not useful, we will find always a different
+51         		 * partition id) */
+52         		if ( PARTITION_ID ^= PARTITION_ID2 ) then do;
+53         			leave;
+54         		end;
+55         
+56         		/* go to next line if equal trx id (avoid comparisons between same TRX_ID!) */
+57         		if ( TRX_ID = TRX_ID2 ) then do;
+58         			currentRow = currentRow + 1;
+59         			continue;
+60         		end;
+61         
+62         		array foodex_unks[1] _temporary_;
+63         		foodex_unks[1] = -1;
+64         
+65         		/* Compute foodex and param distances */
+2                                                       The SAS System                            12:10 Monday, August 28, 2017
+
+66         		%addHierarchyDist(ANALYSISLEVEL, _ID, _ID2, FOODEX_HIER_DIST, 1, 4, foodex_unks);
+67         
+68         		/* for efficiency we check first the foodex and just if the foodex is ok then compute param
+69         		   which has several levels */
+70         		if ( FOODEX_HIER_DIST = 1 ) then do;
+71         			currentRow = currentRow + 1;
+72         			continue;
+73         		end;
+74         
+75         		array param_unks[3] _temporary_;
+76         		param_unks[1] = &paramUnk1;
+77         		param_unks[2] = &paramUnk2;
+78         		param_unks[3] = &paramUnk3;
+79         
+80         		%addHierarchyDist(PARAMCODE, _ID, _ID2, PARAMCODE_HIER_DIST, 1, 7, param_unks);
+81         
+82         		/* Remove records which test different foods or params. This is indeed
+83         		 * a partition extension. We could not test these things before since
+84         		 * we did not have the pairs */
+85         		if ( PARAMCODE_HIER_DIST = 1 ) then do;
+86         			currentRow = currentRow + 1;
+87         			continue;
+88         		end;
+89         
+90         		/* Here compute distances between records inside the same partition and
+91         		 * different transmission id (and same param/foodex) */
+92         
+93         		/* equal/not equal comparisons, unknown not allowed */
+94         		FILENAME_DIST = (FILENAME ^= FILENAME2);
+95         		LABSAMPLE_KEY_ID_DIST = (LABSAMPLE_KEY_ID ^= LABSAMPLE_KEY_ID2);
+96         		LABSUBSAMPCODE_DIST = (LABSUBSAMPCODE ^= LABSUBSAMPCODE2);
+97         		LANG_DIST = (LANG ^= LANG2);
+98         		PARAMTYPE_DIST = (PARAMTYPE ^= PARAMTYPE2);
+99         		RESVALUNCERT_DIST = (RESVALUNCERT ^= RESVALUNCERT2); /* just equal since it is a noisy field */
+100        		RESLEGALLIMIT_DIST = (RESLEGALLIMIT ^= RESLEGALLIMIT2); /* just equal since are standard values */
+101        
+102        
+103        
+104        		/* equal/not equal distances, unknown treated as neutral distance */
+105        
+106        		/* prod method */
+107        		array prod_meth_unk[3] _temporary_;
+108        		prod_meth_unk[1] = -1; /* default missing value for catalogues */
+109        		prod_meth_unk[2] = &UNK_prodmeth1;
+110        		prod_meth_unk[3] = &UNK_prodmeth2;
+111        		PRODMETH_DIST = numEqual(PRODPRODMETH, PRODPRODMETH2, prod_meth_unk);
+112        
+113        		/* prod package */
+114        		array prod_pack_unk[3] _temporary_;
+115        		prod_pack_unk[1] = -1; /* default missing value for catalogues */
+116        		prod_pack_unk[2] = &UNK_prodpack;
+117        		PRODPACK_DIST = numEqual(PRODPACK, PRODPACK2, prod_pack_unk);
+118        
+119        		/* sampling strategy */
+120        		array samp_strat_unk[3] _temporary_;
+121        		samp_strat_unk[1] = -1;
+122        		samp_strat_unk[2] = &UNK_sampstrat1;
+123        		samp_strat_unk[3] = &UNK_sampstrat2;
+124        		PROGSAMPSTRATEGY_DIST = numEqual(PROGSAMPSTRATEGY, PROGSAMPSTRATEGY2, samp_strat_unk);
+125        
+126        		/* 0 is the unknown for years months days... */
+127        		array date_unknowns[1] _temporary_;
+128        		date_unknowns[1] = 0;
+129        
+130        		PRODY_DIST = numEqual(PRODY, PRODY2, date_unknowns);
+131        		PRODM_DIST = numEqual(PRODM, PRODM2, date_unknowns);
+132        		PRODD_DIST = numEqual(PRODD, PRODD2, date_unknowns);
+133        
+3                                                       The SAS System                            12:10 Monday, August 28, 2017
+
+134        		EXPIRY_DIST = numEqual(EXPIRY, EXPIRY2, date_unknowns);
+135        		EXPIRM_DIST = numEqual(EXPIRM, EXPIRM2, date_unknowns);
+136        		EXPIRD_DIST = numEqual(EXPIRD, EXPIRD2, date_unknowns);
+137        
+138        		SAMPY_DIST = numEqual(SAMPY, SAMPY2, date_unknowns);
+139        		SAMPM_DIST = numEqual(SAMPM, SAMPM2, date_unknowns);
+140        		SAMPD_DIST = numEqual(SAMPD, SAMPD2, date_unknowns);
+141        
+142        		ANALYSISY_DIST = numEqual(ANALYSISY, ANALYSISY2, date_unknowns);
+143        		ANALYSISM_DIST = numEqual(ANALYSISM, ANALYSISM2, date_unknowns);
+144        		ANALYSISD_DIST = numEqual(ANALYSISD, ANALYSISD2, date_unknowns);
+145        
+146        		/* sample number */
+147        		array samp_num_unk[2] _temporary_;
+148        		samp_num_unk[1] = .;
+149        		samp_num_unk[2] = 0;
+150        		SAMPLENUM_DIST = numEqual(SAMPLENUM, SAMPLENUM2, samp_num_unk);
+151        
+152        		/* lot size, combine both lotsize and lotsizeunit for the comparison */
+153        		array lot_size_unk[2] _temporary_;
+154        		lot_size_unk[1] = .;
+155        		lot_size_unk[2] = -1;
+156        		LOTSIZE_DIST = unitDistance(LOTSIZEUNIT, LOTSIZE, LOTSIZEUNIT2, LOTSIZE2, lot_size_unk);
+157        
+158        
+159        		/* lod and loq, these values are defined by some rules and should not vary due to humans mistake => equals is
+159      ! sufficient */
+160        		array res_lod_loq_unk[1] _temporary_;
+161        		res_lod_loq_unk[1] = .;
+162        		RESLOD_DIST = numEqual(RESLOD, RESLOD2, res_lod_loq_unk);
+163        		RESLOQ_DIST = numEqual(RESLOQ, RESLOQ2, res_lod_loq_unk);
+164        
+165        		/* expression of result */
+166        		array express_unk[1] _temporary_;
+167        		express_unk[1] = -1;
+168        		EXPRRES_DIST = numEqual(EXPRRES, EXPRRES2, express_unk);
+169        
+170        		/* Result qualitative value */
+171        		array resqual_value_unk[1] _temporary_;
+172        		resqual_value_unk[1] = -1;
+173        		RESQUALVALUE_DIST = numEqual(RESQUALVALUE, RESQUALVALUE2, resqual_value_unk);
+174        
+175        		/* type of result */
+176        		array restype_unk[1] _temporary_;
+177        		restype_unk[1] = -1;
+178        		RESTYPE_DIST = numEqual(RESTYPE, RESTYPE2, restype_unk);
+179        
+180        		/* type of legal limit */
+181        		array legallimit_type_unk[1] _temporary_;
+182        		legallimit_type_unk[1] = -1;
+183        		RESLEGALLIMITTYPE_DIST = numEqual(RESLEGALLIMITTYPE, RESLEGALLIMITTYPE2, legallimit_type_unk);
+184        
+185        
+186        		/* evaluation of the result */
+187        		array reseval_unk[2] _temporary_;
+188        		reseval_unk[1] = -1;
+189        		reseval_unk[2] = &UNK_res_evaluation;
+190        		RESEVALUATION_DIST = numEqual(RESEVALUATION, RESEVALUATION2, reseval_unk);
+191        
+192        
+193        		/* action taken */
+194        		array action_taken_unk[2] _temporary_;
+195        		action_taken_unk[1] = -1;
+196        		action_taken_unk[2] = &UNK_action;
+197        		ACTTAKENCODE_DIST = numEqual(ACTTAKENCODE, ACTTAKENCODE2, action_taken_unk);
+198        
+199        
+200        		/* type of legal limit */
+4                                                       The SAS System                            12:10 Monday, August 28, 2017
+
+201        		array legallimit_unk[1] _temporary_;
+202        		legallimit_unk[1] = .;
+203        		RESLEGALLIMITTYPE_DIST = numEqual(RESLEGALLIMITTYPE, RESLEGALLIMITTYPE2, legallimit_unk);
+204        
+205        
+206        
+207        
+208        		/* Strings EQUAL distances */
+209        
+210        		/* Lab code, just check if equal or unknown (it is a code, string similarity does not make any sense)*/
+211        		array lab_code_unk[1] $ _temporary_;
+212        		lab_code_unk[1] = 'N_A';
+213        		LABCODE_DIST = strEqual(LABCODE, LABCODE2, lab_code_unk);
+214        
+215        
+216        
+217        
+218        		/* contains distances */
+219        
+220        		/* It could happen that one code is contained into the other,
+221        		 * we take into account this possibility */
+222        		array contained_unk[1] $ _temporary_;
+223        		contained_unk[1] = "";
+224        
+225        		LABSAMPCODE_DIST = isContainedDist(LABSAMPCODE, LABSAMPCODE2, contained_unk);
+226        		LABSAMPCODEFLAT_DIST = isContainedDist(LABSAMPCODEFLAT, LABSAMPCODEFLAT2, contained_unk);
+227        
+228        		RESULTCODE_DIST = isContainedDist(RESULTCODE, RESULTCODE2, contained_unk);
+229        		RESULTCODEFLAT_DIST = isContainedDist(RESULTCODEFLAT, RESULTCODEFLAT2, contained_unk);
+230        
+231        
+232        
+233        		/* compute country distances */
+234        
+235        		SAMPCOUNTRY_DIST = getCountryDist(SAMPCOUNTRYCODE, SAMPCOUNTRYCODE2, MEMBEROFEU, MEMBEROFEU2, MEMBEROFEEA,
+235      ! MEMBEROFEEA2);
+236        
+237        		ORIGCOUNTRY_DIST = getCountryDist(ORIGCOUNTRYCODE, ORIGCOUNTRYCODE2, ORIGCOUNTRYEU, ORIGCOUNTRYEU2,
+237      ! ORIGCOUNTRYEEA, ORIGCOUNTRYEEA2);
+238        
+239        		PROCCOUNTRY_DIST = getCountryDist(PROCCOUNTRYCODE, PROCCOUNTRYCODE2, PROCCOUNTRYEU, PROCCOUNTRYEU2,
+239      ! PROCCOUNTRYEEA, PROCCOUNTRYEEA2);
+240        
+241        		LABCOUNTRY_DIST = getCountryDist(LABCOUNTRYCODE, LABCOUNTRYCODE2, LABCOUNTRYEU, LABCOUNTRYEU2, LABCOUNTRYEEA,
+241      ! LABCOUNTRYEEA2);
+242        
+243        		LOCALORGCOUNTRY_DIST = getCountryDist(LOCALORGCOUNTRYCODE, LOCALORGCOUNTRYCODE2, LOCALORGCOUNTRYEU,
+244        									LOCALORGCOUNTRYEU2, LOCALORGCOUNTRYEEA, LOCALORGCOUNTRYEEA2);
+245        
+246        
+247        
+248        		/* prepare the unknown values for each catalogue */
+249        		array nuts_unks[5] _temporary_;
+250        		nuts_unks[1] = &nutsUnk1;
+251        		nuts_unks[2] = &nutsUnk2;
+252        		nuts_unks[3] = &nutsUnk3;
+253        		nuts_unks[4] = &nutsUnk4;
+254        		nuts_unks[5] = &nutsUnk5;
+255        
+256        		array farea_unks[1] _temporary_;
+257        		farea_unks[1] = &fareaUnk1;
+258        
+259        		array prodtr_unks[1] _temporary_;
+260        		prodtr_unks[1] = &prodtrUnk1;
+261        
+262        		array prgtyp_unks[2] _temporary_;
+263        		prgtyp_unks[1] = &prgtypUnk1;
+264        		prgtyp_unks[2] = &prgtypUnk2;
+5                                                       The SAS System                            12:10 Monday, August 28, 2017
+
+265        
+266        		array sampmd_unks[2] _temporary_;
+267        		sampmd_unks[1] = &sampmdUnk1;
+268        		sampmd_unks[2] = &sampmdUnk2;
+269        
+270        		array sampnt_unks[4] _temporary_;
+271        		sampnt_unks[1] = &sampntUnk1;
+272        		sampnt_unks[2] = &sampntUnk2;
+273        		sampnt_unks[3] = &sampntUnk3;
+274        		sampnt_unks[4] = &sampntUnk4;
+275        		
+276        		array anlymd_unks[2] _temporary_;
+277        		anlymd_unks[1] = &anlymdUnk1;
+278        		anlymd_unks[2] = &anlymdUnk2;
+279        
+280        		%addHierarchyDist(SAMPAREA, _ID, _ID2, SAMPAREA_HIER_DIST, 1, 5, nuts_unks);
+281        		%addHierarchyDist(ORIGAREA, _ID, _ID2, ORIGAREA_HIER_DIST, 1, 5, nuts_unks);
+282        		%addHierarchyDist(ORIGFISHAREAID, _ID, _ID2, ORIGFISHAREA_HIER_DIST, 1, 6, farea_unks);
+283        		%addHierarchyDist(PROCAREA, _ID, _ID2, PROCAREA_HIER_DIST, 1, 5, nuts_unks);
+284        		%addProdTreatHierDist(PRODTREAT, _ID, _ID2, PRODTREAT_HIER_DIST, 1, 3, prodtr_unks);
+285        		%addHierarchyDist(PROGTYPE, _ID, _ID2, PROGTYPE_HIER_DIST, 1, 2, prgtyp_unks);
+286        		%addHierarchyDist(SAMPMETHOD, _ID, _ID2, SAMPMETHOD_HIER_DIST, 1, 1, sampmd_unks);
+287        		%addHierarchyDist(SAMPPOINT, _ID, _ID2, SAMPPOINT_HIER_DIST, 1, 4, sampnt_unks);
+288        		%addHierarchyDist(ANMETHCODE, _ID, _ID2, ANMETHCODE_HIER_DIST, 1, 5, anlymd_unks);
+289        
+290        		/* String distances */
+291        
+292        		array strings_unk[2] $ _temporary_;
+293        		strings_unk[1] = 'N_A';
+294        		strings_unk[2] = 'Unknown';
+295        
+296        		/* decide thresholds based on maximum number of characters! */
+297        		*ORIGFISHAREATEXT_LEV_DIST = stringDist( ORIGFISHAREATEXT, ORIGFISHAREATEXT2, 5, strings_unk, 'complev', 0);
+298        		ORIGFISHAREATEXT_GED_DIST = stringDist( ORIGFISHAREATEXT, ORIGFISHAREATEXT2, 500, strings_unk, 'compged', 0);
+299        		*ORIGFISHAREATEXT_SPEDIS_DIST = stringDist( ORIGFISHAREATEXT, ORIGFISHAREATEXT2, 30, strings_unk, 'spedis', 0);
+300        
+301        		/* Code and text are indeed correlated. Therefore we check text differences
+302        		 * just if we have similar codes */
+303        		if ( ORIGFISHAREA_HIER_DIST <= 0.5 ) then do;
+304        			*ORIGFISHAREACOMB_LEV_DIST = ORIGFISHAREATEXT_LEV_DIST;
+305        			ORIGFISHAREACOMB_GED_DIST = ORIGFISHAREATEXT_GED_DIST;
+306        			*ORIGFISHAREACOMB_SPEDIS_DIST = ORIGFISHAREATEXT_SPEDIS_DIST;
+307        		end;
+308        		else do;
+309        			*ORIGFISHAREACOMB_LEV_DIST = 1;
+310        			ORIGFISHAREACOMB_GED_DIST = 1;
+311        			*ORIGFISHAREACOMB_SPEDIS_DIST = 1;
+312        		end;
+313        
+314        		*PRODTEXT_LEV_DIST = stringDist( PRODTEXT, PRODTEXT2, 5, strings_unk, 'complev', 0 );
+315        		PRODTEXT_GED_DIST = stringDist( PRODTEXT, PRODTEXT2, 150, strings_unk, 'compged', 0 );
+316        		*PRODTEXT_SPEDIS_DIST = stringDist( PRODTEXT, PRODTEXT2, 30, strings_unk, 'spedis', 0 );
+317        
+318        		*PRODBRANDNAME_LEV_DIST = stringDist( PRODBRANDNAME, PRODBRANDNAME2, 5, strings_unk, 'complev', 0 );
+319        		PRODBRANDNAME_GED_DIST = stringDist( PRODBRANDNAME, PRODBRANDNAME2, 500, strings_unk, 'compged', 0 );
+320        		*PRODBRANDNAME_SPEDIS_DIST = stringDist( PRODBRANDNAME, PRODBRANDNAME2, 30, strings_unk, 'spedis', 0 );
+321        
+322        		*PRODMANUF_LEV_DIST = stringDist( PRODMANUF, PRODMANUF2, 5, strings_unk, 'complev', 0 );
+323        		PRODMANUF_GED_DIST = stringDist( PRODMANUF, PRODMANUF2, 500, strings_unk, 'compged', 0 );
+324        		*PRODMANUF_SPEDIS_DIST = stringDist( PRODMANUF, PRODMANUF2, 30, strings_unk, 'spedis', 0 );
+325        
+326        		*PRODCOM_LEV_DIST = stringDist( PRODCOM, PRODCOM2, 5, strings_unk, 'complev', 0 );
+327        		PRODCOM_GED_DIST = stringDist( PRODCOM, PRODCOM2, 500, strings_unk, 'compged', 0 );
+328        		*PRODCOM_SPEDIS_DIST = stringDist( PRODCOM, PRODCOM2, 30, strings_unk, 'spedis', 0 );
+329        
+330        		*PROGCODE_LEV_DIST = stringDist( PROGCODE, PROGCODE2, 5, strings_unk, 'complev', 1 );
+331        		PROGCODE_GED_DIST = stringDist( PROGCODE, PROGCODE2, 500, strings_unk, 'compged', 1 );
+332        		*PROGCODE_SPEDIS_DIST = stringDist( PROGCODE, PROGCODE2, 30, strings_unk, 'spedis', 1 );
+6                                                       The SAS System                            12:10 Monday, August 28, 2017
+
+333        
+334        		*PROGLEGALREF_LEV_DIST = stringDist( PROGLEGALREF, PROGLEGALREF2, 5, strings_unk, 'complev', 1 );
+335        		PROGLEGALREF_GED_DIST = stringDist( PROGLEGALREF, PROGLEGALREF2, 500, strings_unk, 'compged', 1 );
+336        		*PROGLEGALREF_SPEDIS_DIST = stringDist( PROGLEGALREF, PROGLEGALREF2, 30, strings_unk, 'spedis', 1 );
+337        
+338        		*LOCALORG_LEV_DIST = stringDist( LOCALORG, LOCALORG2, 5, strings_unk, 'complev', 0 );
+339        		LOCALORG_GED_DIST = stringDist( LOCALORG, LOCALORG2, 500, strings_unk, 'compged', 0 );
+340        		*LOCALORG_SPEDIS_DIST = stringDist( LOCALORG, LOCALORG2, 30, strings_unk, 'spedis', 0 );
+341        
+342        		*PARAMTEXT_LEV_DIST = stringDist( PARAMTEXT, PARAMTEXT2, 5, strings_unk, 'complev', 0 );
+343        		PARAMTEXT_GED_DIST = stringDist( PARAMTEXT, PARAMTEXT2, 500, strings_unk, 'compged', 0 );
+344        		*PARAMTEXT_SPEDIS_DIST = stringDist( PARAMTEXT, PARAMTEXT2, 30, strings_unk, 'spedis', 0 );
+345        
+346        		*ANMETHREFCODE_LEV_DIST = stringDist( ANMETHREFCODE, ANMETHREFCODE2, 5, strings_unk, 'complev', 1 );
+347        		ANMETHREFCODE_GED_DIST = stringDist( ANMETHREFCODE, ANMETHREFCODE2, 500, strings_unk, 'compged', 1 );
+348        		*ANMETHREFCODE_SPEDIS_DIST = stringDist( ANMETHREFCODE, ANMETHREFCODE2, 30, strings_unk, 'spedis', 1 );
+349        
+350        		*ANMETHTEXT_LEV_DIST = stringDist( ANMETHTEXT, ANMETHTEXT2, 5, strings_unk, 'complev', 0 );
+351        		ANMETHTEXT_GED_DIST = stringDist( ANMETHTEXT, ANMETHTEXT2, 500, strings_unk, 'compged', 0 );
+352        		*ANMETHTEXT_SPEDIS_DIST = stringDist( ANMETHTEXT, ANMETHTEXT2, 30, strings_unk, 'spedis', 0 );
+353        
+354        
+355        		/* Code and text are indeed correlated. Therefore we check text differences
+356        		 * just if we have similar codes */
+357        		if ( ANMETHCODE_HIER_DIST <= 0.5 ) then do;
+358        			*ANMETHCOMB_LEV_DIST = ANMETHTEXT_LEV_DIST;
+359        			ANMETHCOMB_GED_DIST = ANMETHTEXT_GED_DIST;
+360        			*ANMETHCOMB_SPEDIS_DIST = ANMETHTEXT_SPEDIS_DIST;
+361        		end;
+362        		else do;
+363        			*ANMETHCOMB_LEV_DIST = 1;
+364        			ANMETHCOMB_GED_DIST = 1;
+365        			*ANMETHCOMB_SPEDIS_DIST = 1;
+366        		end;
+367        
+368        
+369        		*RESCOMM_LEV_DIST = stringDist( RESCOMM, RESCOMM2, 5, strings_unk, 'complev', 0 );
+370        		RESCOMM_GED_DIST = stringDist( RESCOMM, RESCOMM2, 500, strings_unk, 'compged', 0 );
+371        		*RESCOMM_SPEDIS_DIST = stringDist( RESCOMM, RESCOMM2, 30, strings_unk, 'spedis', 0 );
+372        
+373        		PRODINGRED_GED_DIST = stringDist( PRODINGRED, PRODINGRED2, 500, strings_unk, 'compged', 0 );
+374        
+375        		/* numeric distances */
+376        
+377        		/* percentages has 0 as minimum and 100 as maximum */
+378        		FATPERC_DIST = euclidDistNormalized(FATPERC, FATPERC2, 0, 100);
+379        		MOISTPERC_DIST = euclidDistNormalized(MOISTPERC, MOISTPERC2, 0, 100);
+380        
+381        		/* output the created pair and go on with the cycle */
+382        		output;
+383        
+384        		currentRow = currentRow + 1;
+385        	end;
+386        
+387        	drop &varToDrop;
+388        run;
+
+NOTE: There were 7485149 observations read from the data set MYLIB.TRN_SET.
+NOTE: The data set MYLIB.TRN_PAIRS has 98032101 observations and 76 variables.
+NOTE: Compressing data set MYLIB.TRN_PAIRS decreased size by 61.72 percent. 
+      Compressed is 1443190 pages; un-compressed would require 3770466 pages.
+NOTE: DATA statement used (Total process time):
+      real time           36:16:38.12
+      cpu time            35:18:10.81
+      
+
+389        
+390        GOPTIONS NOACCESSIBLE;
+7                                                       The SAS System                            12:10 Monday, August 28, 2017
+
+391        %LET _CLIENTTASKLABEL=;
+392        %LET _CLIENTPROJECTPATH=;
+393        %LET _CLIENTPROJECTNAME=;
+394        %LET _SASPROGRAMFILE=;
+395        
+396        ;*';*";*/;quit;run;
+397        ODS _ALL_ CLOSE;
+398        
+399        
+400        QUIT; RUN;
+401        

@@ -1,0 +1,128 @@
+1                                                       The SAS System                          09:45 Thursday, August 31, 2017
+
+1          ;*';*";*/;quit;run;
+2          OPTIONS PAGENO=MIN;
+3          %LET _CLIENTTASKLABEL='Read training set';
+4          %LET _CLIENTPROJECTPATH='C:\Users\avonva\Desktop\Pairs on DWH.egp';
+5          %LET _CLIENTPROJECTNAME='Pairs on DWH.egp';
+6          %LET _SASPROGRAMFILE=;
+7          
+8          ODS _ALL_ CLOSE;
+9          OPTIONS DEV=ACTIVEX;
+10         GOPTIONS XPIXELS=0 YPIXELS=0;
+11         FILENAME EGSR TEMP;
+12         ODS tagsets.sasreport13(ID=EGSR) FILE=EGSR STYLE=HtmlBlue
+12       ! STYLESHEET=(URL="file:///C:/Program%20Files/SASHome/x86/SASEnterpriseGuide/5.1/Styles/HtmlBlue.css") NOGTITLE
+12       ! NOGFOOTNOTE GPATH=&sasworklocation ENCODING=UTF8 options(rolap="on");
+NOTE: Writing TAGSETS.SASREPORT13(EGSR) Body file: EGSR
+13         
+14         GOPTIONS ACCESSIBLE;
+15         /*
+16          * @author Avon Valentino, Crt Sustar - August 2017
+17          *
+18          * In this program all the required data are loaded from the data warehouse
+19          * In particular, non valid data are removed (i.e. too old data, non accepted
+20          * records or records which measures an unknown Param element, which is not useful
+21          * since it is one of the central elements for chemical occurrence domain). Also records
+22          * with strange result unit are removed, since they cannot be actually interpreted
+23          */
+24         
+25         data _null_;
+26         	putlog 'NOTE: Extracting data from DWH';
+27         run;
+
+NOTE: Extracting data from DWH
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+28         
+29         /*
+30          * Select extraction from the data warehouse
+31          * Remove useless variables
+32          */
+33         data &trn_table(drop = RESVALLB RESVALMB RESVALUB RESVALFWLB RESVALFWMB
+34         							RESVALFWUB RESVAL88DMLB RESVAL88DMMB RESVAL88DMUB
+35         							RESVALWWLB RESVALWWUB);
+36         
+37         	set &dwh;
+38         	if SAMPY not in (&sampling_years) then delete;      /* get only data in required sampling years */
+39         	if PARAMCODE in (13539, 13540, 10654) then delete;  /* remove unknown values */
+40         	if RESUNIT in (234, 189, 29) then delete;           /* remove resunit = other, Unit(50 records), Fill values (500
+40       ! records) */
+41         
+42         	if DCF_STATUS not in ('ACCEPTED_DCF',               /* exclude rejected and replaced */
+43         						'ACCEPTED',
+44         						'ACCEPTED_DWH',
+45         						'SUBMITTED')
+46         				  then delete;
+47         run;
+
+NOTE: There were 5774446 observations read from the data set SSD_DWH.DC_OCC_DWH.
+NOTE: There were 5774446 observations read from the data set SSD_OUT.DC_OCC_DWH.
+NOTE: The data set MYLIB.TRN_SET_2012 has 673358 observations and 101 variables.
+NOTE: Compressing data set MYLIB.TRN_SET_2012 decreased size by 94.39 percent. 
+      Compressed is 37807 pages; un-compressed would require 673358 pages.
+NOTE: DATA statement used (Total process time):
+      real time           5:36.21
+      cpu time            2:28.21
+      
+2                                                       The SAS System                          09:45 Thursday, August 31, 2017
+
+
+48         
+49         /*
+50          * delete FoodEx1 ROOT terms (useless for chemical analysis)
+51          * delete Param ROOT terms (useless for chemical analysis)
+52          * using the terms which are marked as ROOT in the chemical occurrence hierarchy
+53          * for the PARAM, and in the master hierarchy for the FOODEX
+54          */
+55         proc sql;
+56         	delete from &trn_table
+57         	where PARAMCODE in ( select ID from &official_param_cat where CHEMOCCREPPARENTCODE = 'ROOT' )
+58         	and EFSAPRODCODE in ( select ID from &foodex_cat where MASTERPARENTCODE = 'ROOT' );
+NOTE: No rows were deleted from MYLIB.TRN_SET_2012.
+
+59         run;
+NOTE: PROC SQL statements are executed immediately; The RUN statement has no effect.
+60         
+61         /* DEBUG Subset the training set to get analysis faster */
+62         /*proc surveyselect data=myLib.&dwh_extraction
+63         	method=srs n=30000 seed=1 out=myLib.&trn_table;
+64         run;
+65         */
+66         
+67         /* set a unique identifier to rows (useful to make self-joins quickly) */
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           38.43 seconds
+      cpu time            6.22 seconds
+      
+68         data &trn_table;
+
+69         	set &trn_table;
+70         	ID = _N_;
+71         run;
+
+NOTE: There were 673358 observations read from the data set MYLIB.TRN_SET_2012.
+NOTE: The data set MYLIB.TRN_SET_2012 has 673358 observations and 102 variables.
+NOTE: Compressing data set MYLIB.TRN_SET_2012 decreased size by 94.34 percent. 
+      Compressed is 38080 pages; un-compressed would require 673358 pages.
+NOTE: DATA statement used (Total process time):
+      real time           1:17.65
+      cpu time            18.92 seconds
+      
+
+72         
+73         GOPTIONS NOACCESSIBLE;
+74         %LET _CLIENTTASKLABEL=;
+75         %LET _CLIENTPROJECTPATH=;
+76         %LET _CLIENTPROJECTNAME=;
+77         %LET _SASPROGRAMFILE=;
+78         
+79         ;*';*";*/;quit;run;
+80         ODS _ALL_ CLOSE;
+81         
+82         
+83         QUIT; RUN;
+84         

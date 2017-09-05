@@ -1,0 +1,648 @@
+1                                                       The SAS System                         14:08 Wednesday, August 30, 2017
+
+1          ;*';*";*/;quit;run;
+2          OPTIONS PAGENO=MIN;
+3          %LET _CLIENTTASKLABEL='RESVALWWMB - Overlapping bins creator';
+4          %LET _CLIENTPROJECTPATH='C:\Users\avonva\Desktop\Pairs on DWH.egp';
+5          %LET _CLIENTPROJECTNAME='Pairs on DWH.egp';
+6          %LET _SASPROGRAMFILE=;
+7          
+8          ODS _ALL_ CLOSE;
+9          OPTIONS DEV=ACTIVEX;
+10         GOPTIONS XPIXELS=0 YPIXELS=0;
+11         FILENAME EGSR TEMP;
+12         ODS tagsets.sasreport13(ID=EGSR) FILE=EGSR STYLE=HtmlBlue
+12       ! STYLESHEET=(URL="file:///C:/Program%20Files/SASHome/x86/SASEnterpriseGuide/5.1/Styles/HtmlBlue.css") NOGTITLE
+12       ! NOGFOOTNOTE GPATH=&sasworklocation ENCODING=UTF8 options(rolap="on");
+NOTE: Writing TAGSETS.SASREPORT13(EGSR) Body file: EGSR
+13         
+14         GOPTIONS ACCESSIBLE;
+15         /*
+16          * @author Avon Valentino, Crt Sustar - August 2017
+17          *
+18          * This program is used to create overlapping bins for RESVALWWMB
+19          * given a dataset which already has non overlapping bins computed
+20          * in a column named BINFLAG. The overlapping bins will be created
+21          * in a column named OVERLAPBINFLAG.
+22          *
+23          * The non overlapped bins were computed using the smallest available element
+24          * as reference, that is, all the distance comparisons were computed between
+25          * the partition records and the reference. This implies that records in the edges of adjacent bins
+26          * could be very close among them, although they are too distant from the reference
+27          * element, and therefore they were put in different bins.
+28          * Since it is reasonable to compare also these values for the duplicates detection,
+29          * we put records present in the edge of a bin also in the adjacent bins if they are sufficiently close
+30          * to the records on the endge of the adjacent bins. This creates a kind of overlapping.
+31          */
+32         
+33         data _null_;
+34         	putlog 'NOTE: Computing overlap for bins';
+35         run;
+
+NOTE: Computing overlap for bins
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+36         
+37         /* The tolerance for making overlapping bins. Bigger values => less overlapping */
+38         %let overlap_tolerance = 1000;
+39         
+40         /* Order data to perform next code */
+41         proc sort data=&trn_table;
+42         	by COUNTRY_YEARUNITFOODPARAM_FLAG BINFLAG RESVALWWMB;
+43         run;
+
+NOTE: There were 891107 observations read from the data set MYLIB.TRN_SET_2015.
+NOTE: The data set MYLIB.TRN_SET_2015 has 891107 observations and 118 variables.
+NOTE: Compressing data set MYLIB.TRN_SET_2015 decreased size by 93.28 percent. 
+      Compressed is 59899 pages; un-compressed would require 891107 pages.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           1:56.23
+      cpu time            52.65 seconds
+      
+
+44         
+45         
+46         /* Keep just partition flag and bin flag to speed up calculation */
+47         data myLib.PARTITION_BIN_FLAGS(keep=ID COUNTRY_YEARUNITFOODPARAM_FLAG BINFLAG RESVALWWMB MINRESVAL MAXRESVAL );
+48         	set &trn_table;
+2                                                       The SAS System                         14:08 Wednesday, August 30, 2017
+
+49         run;
+
+NOTE: There were 891107 observations read from the data set MYLIB.TRN_SET_2015.
+NOTE: The data set MYLIB.PARTITION_BIN_FLAGS has 891107 observations and 6 variables.
+NOTE: Compressing data set MYLIB.PARTITION_BIN_FLAGS decreased size by 4.79 percent. 
+      Compressed is 10101 pages; un-compressed would require 10609 pages.
+NOTE: DATA statement used (Total process time):
+      real time           1:06.92
+      cpu time            9.04 seconds
+      
+
+50         
+51         proc sort data=myLib.PARTITION_BIN_FLAGS;
+52         	by COUNTRY_YEARUNITFOODPARAM_FLAG BINFLAG;
+53         run;
+
+NOTE: There were 891107 observations read from the data set MYLIB.PARTITION_BIN_FLAGS.
+NOTE: The data set MYLIB.PARTITION_BIN_FLAGS has 891107 observations and 6 variables.
+NOTE: Compressing data set MYLIB.PARTITION_BIN_FLAGS decreased size by 4.79 percent. 
+      Compressed is 10101 pages; un-compressed would require 10609 pages.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           9.64 seconds
+      cpu time            1.82 seconds
+      
+
+54         
+55         %let currentPartition = .;
+56         %let currentBin = .;
+57         %let nextBin = .;
+58         %let nextBinStart = .;
+59         %let prevBin = .;
+60         %let prevBinEnd = .;
+61         
+62         /* Compute for each bin which is the previous/next bin and the row where the next bin starts and the prev ends */
+63         data myLib.PARTITION_BIN_FLAGS (keep=ID COUNTRY_YEARUNITFOODPARAM_FLAG BINFLAG
+64         			NEXTBIN PREVBIN PREVBINEND NEXTBINSTART RESVALWWMB MINRESVAL MAXRESVAL );
+65         
+66         	set myLib.PARTITION_BIN_FLAGS nobs=nobs;
+67         
+68         	NEXTBIN = .;
+69         	NEXTBINSTART = .;
+70         
+71         	/* if different partition reset variables
+72         	 * and recompute next bin */
+73         	if ( symgetn('currentPartition') ^= COUNTRY_YEARUNITFOODPARAM_FLAG ) then do;
+74         
+75         		call symput('currentPartition', COUNTRY_YEARUNITFOODPARAM_FLAG);
+76         
+77         		resetVar = .;
+78         
+79         		call symput('currentBin', resetVar);
+80         		call symput('prevBin', resetVar);
+81         		call symput('prevBinEnd', resetVar);
+82         		call symput('nextBin', resetVar);
+83         		call symput('nextBinStart', resetVar);
+84         
+85         		PARTITIONCHANGED = COUNTRY_YEARUNITFOODPARAM_FLAG;
+86         	end;
+87         	else PARTITIONCHANGED = .;
+88         
+89         
+90         
+91         	/* if we have a new bin search next bin */
+92         	if ( symgetn('currentBin') ^= BINFLAG ) then do;
+93         		BINCHANGED = BINFLAG;
+94         	end;
+95         	else BINCHANGED = .;
+96         
+3                                                       The SAS System                         14:08 Wednesday, August 30, 2017
+
+97         
+98         
+99         	/* if we have a new bin search next bin */
+100        	if ( symgetn('currentBin') ^= BINFLAG ) then do;
+101        
+102        		call symput('currentBin', BINFLAG);
+103        
+104        
+105        		/* Search previous bin */
+106        		PREVBIN = .;
+107        		PREVBINEND = .;
+108        
+109        		binRow = _N_;
+110        		do while( binRow > 0 );
+111        
+112        			/* set current row, rename variables to avoid conflicts */
+113        			set myLib.PARTITION_BIN_FLAGS(rename= (
+114        				ID = PREVID
+115        				COUNTRY_YEARUNITFOODPARAM_FLAG = PREVPARTFLAG
+116        				BINFLAG = PREVBINFLAG
+117        				RESVALWWMB = PREVVALUE
+118        				MINRESVAL = PREVMINRESVAL
+119        				MAXRESVAL = PREVMAXRESVAL)) point=binRow;
+120        
+121        			/* if we arrived into another partition stop,
+122        			 * we do not mix bins of different partitions */
+123        			if ( symgetn('currentPartition') ^= PREVPARTFLAG ) then do;
+124        				leave;
+125        			end;
+126        			
+127        			/* if prev bin is found inside same partition */
+128        			if ( symgetn('currentBin') ^= PREVBINFLAG ) then do;
+129        
+130        				/* save row in which the bin start */
+131        				PREVBINEND = binRow;
+132        				PREVBIN = PREVBINFLAG;
+133        
+134        				call symput('prevBin', PREVBIN);
+135        				call symput('prevBinEnd', PREVBINEND);
+136        
+137        				/* work finished, exit loop */
+138        				leave;
+139        			end;
+140        
+141        			/* decrement row number */
+142        			binRow = binRow - 1;
+143        		end; /* END DIFFERENT BIN WHILE */
+144        
+145        
+146        
+147        
+148        
+149        		/* search next bin */
+150        		binRow = _N_;
+151        		do while( binRow <= nobs );
+152        
+153        			/* set current row, rename variables to avoid conflicts */
+154        			set myLib.PARTITION_BIN_FLAGS(rename= (
+155        				ID = NEXTID
+156        				COUNTRY_YEARUNITFOODPARAM_FLAG = NEXTPARTFLAG
+157        				BINFLAG = NEXTBINFLAG
+158        				RESVALWWMB = NEXTVALUE
+159        				MINRESVAL = NEXTMINRESVAL
+160        				MAXRESVAL = NEXTMAXRESVAL)) point=binRow;
+161        
+162        			/* if we arrived into another partition stop,
+163        			 * we do not mix bins of different partitions */
+164        			if ( symgetn('currentPartition') ^= NEXTPARTFLAG ) then do;
+4                                                       The SAS System                         14:08 Wednesday, August 30, 2017
+
+165        				call symput('nextBin', .);
+166        				call symput('nextBinStart', .);
+167        				leave;
+168        			end;
+169        			
+170        
+171        			/* if next bin is found inside same partition */
+172        			if ( symgetn('currentBin') ^= NEXTBINFLAG ) then do;
+173        
+174        				/* save row in which the bin start */
+175        				NEXTBINSTART = binRow;
+176        
+177        				/* save the bin flag */
+178        				NEXTBIN = NEXTBINFLAG;
+179        
+180        				call symput('nextBin', NEXTBIN);
+181        				call symput('nextBinStart', NEXTBINSTART);
+182        
+183        				/* work finished, exit loop */
+184        				leave;
+185        			end;
+186        
+187        			/* increment row number */
+188        			binRow = binRow + 1;
+189        		end; /* END DIFFERENT BIN WHILE */
+190        
+191        	end;
+192        	else do;
+193        		/* if instead we are inside the same bin put previous information in current row */
+194        		NEXTBIN = symgetn('nextBin');
+195        		NEXTBINSTART = symgetn('nextBinStart');
+196        		PREVBIN = symgetn('prevBin');
+197        		PREVBINEND = symgetn('prevBinEnd');
+198        	end;
+199        run;
+
+NOTE: Numeric values have been converted to character values at the places given by: (Line):(Column).
+      75:35    79:29    80:26    81:29    82:26    83:31    102:29   134:28   135:31   165:28   166:33   180:28   181:33
+NOTE: There were 891107 observations read from the data set MYLIB.PARTITION_BIN_FLAGS.
+NOTE: The data set MYLIB.PARTITION_BIN_FLAGS has 891107 observations and 10 variables.
+NOTE: Compressing data set MYLIB.PARTITION_BIN_FLAGS decreased size by 18.95 percent. 
+      Compressed is 7152 pages; un-compressed would require 8824 pages.
+NOTE: DATA statement used (Total process time):
+      real time           17.53 seconds
+      cpu time            8.39 seconds
+      
+
+200        
+201        /* Initialize variables */
+202        data myLib.PARTITION_BIN_FLAGS;
+203        	set mylib.PARTITION_BIN_FLAGS;
+204        
+205        	/* initialize flag value */
+206        	OVERLAPBINFLAG = cats("$", BINFLAG, "$");
+207        	OVERLAPCOUNT = 0;
+208        run;
+
+NOTE: There were 891107 observations read from the data set MYLIB.PARTITION_BIN_FLAGS.
+NOTE: The data set MYLIB.PARTITION_BIN_FLAGS has 891107 observations and 12 variables.
+NOTE: Compressing data set MYLIB.PARTITION_BIN_FLAGS decreased size by 75.18 percent. 
+      Compressed is 3950 pages; un-compressed would require 15913 pages.
+NOTE: DATA statement used (Total process time):
+      real time           10.29 seconds
+      cpu time            2.62 seconds
+      
+
+209        
+210        /*
+5                                                       The SAS System                         14:08 Wednesday, August 30, 2017
+
+211         * Check thresholds on intra-bins records (i.e. records belonging to different bins)
+212         * a variable named OVERLAPBINFLAG contains all the bins which contain the current record
+213         * with the following syntax: $bin1$$bin2$...
+214         */
+215        data myLib.PARTITION_BIN_FLAGS(drop=NEXTMINRESVAL NEXTMAXRESVAL NEXTOVERLAPBINFLAG NEXTOVERLAPCOUNT
+216        								PREVPREVBINEND PREVPREVBINFLAG NEXTNEXTBINFLAG NEXTBINFLAG
+217        								NEXTPARTITION PREVPARTITION PREVOVERLAPBINFLAG PREVOVERLAPCOUNT
+218        								NEXTRESVALWWMB PREVRESVALWWMB PREVBINFLAG PREVMINRESVAL PREVMAXRESVAL
+219        								NEXTNEXTBINSTART NEXTID PREVID);
+220        
+221        	set myLib.PARTITION_BIN_FLAGS nobs=nobs;
+222        
+223        	/* evaluate all the rows of the next bin */
+224        	nextBinRow = NEXTBINSTART;
+225        
+226        	/* Go on until we finish the bins of the partition of if we arrive to the end of the dataset */
+227        	do while ( NEXTBIN ^= . & nextBinRow <= nobs);
+228        		
+229        		/* point to next bin row and rename columns, otherwise errors */
+230        		set myLib.PARTITION_BIN_FLAGS(rename=(
+231        			ID = NEXTID
+232        			BINFLAG = NEXTBINFLAG
+233        			NEXTBIN = NEXTNEXTBINFLAG
+234        			NEXTBINSTART = NEXTNEXTBINSTART
+235        			PREVBIN = PREVPREVBINFLAG
+236        			PREVBINEND = PREVPREVBINEND
+237        			RESVALWWMB = NEXTRESVALWWMB
+238        			COUNTRY_YEARUNITFOODPARAM_FLAG = NEXTPARTITION
+239        			MINRESVAL = NEXTMINRESVAL
+240        			MAXRESVAL = NEXTMAXRESVAL
+241        			OVERLAPBINFLAG = NEXTOVERLAPBINFLAG
+242        			OVERLAPCOUNT = NEXTOVERLAPCOUNT
+243        			)) point=nextBinRow;
+244        
+245        		/* if the bin is in another partition exit loop we do not compare bins of different partitions */
+246        		if ( COUNTRY_YEARUNITFOODPARAM_FLAG ^= NEXTPARTITION ) then do;
+247        			leave;
+248        		end;
+249        
+250        		/* if the next bin is finished then stop */
+251        		if ( NEXTBIN ^= NEXTBINFLAG ) then do;
+252        			leave;
+253        		end;
+254        
+255        		/* here we have the adjacent bin records, therefore we check if the threshold is ok between the adjacent record
+255      ! and the
+256        		 * record of the current bin
+257        		 */
+258        		if abs(NEXTRESVALWWMB - RESVALWWMB) <= (MAXRESVAL - MINRESVAL)/&overlap_tolerance then do;
+259        			/* if new bin not present add to the flag */
+260        			if not ( find(OVERLAPBINFLAG, cats("$", NEXTBINFLAG, "$") ) ge 1 ) then do;
+261        				OVERLAPBINFLAG = cats(OVERLAPBINFLAG, "$", NEXTBINFLAG, "$");
+262        				OVERLAPCOUNT = OVERLAPCOUNT + 1;
+263        			end;
+264        		end;
+265        		else do;
+266        			leave; /* exit bin loop if threshold is not satisfied (next elements are farther, no check is needed) */
+267        		end;
+268        
+269        		nextBinRow = nextBinRow + 1;
+270        	end; /* END NEXT BIN WHILE ITERATOR */
+271        
+272        
+273        
+274        	/* evaluate all the rows of the prev bin */
+275        	prevBinRow = PREVBINEND;
+276        	do while ( PREVBIN ^= . & prevBinRow > 0 );
+277        		
+6                                                       The SAS System                         14:08 Wednesday, August 30, 2017
+
+278        		/* point to prev bin row and rename columns, otherwise errors */
+279        		set myLib.PARTITION_BIN_FLAGS(rename=(
+280        			ID = PREVID
+281        			BINFLAG = PREVBINFLAG
+282        			NEXTBIN = NEXTNEXTBINFLAG
+283        			NEXTBINSTART = NEXTNEXTBINSTART
+284        			PREVBIN = PREVPREVBINFLAG
+285        			PREVBINEND = PREVPREVBINEND
+286        			RESVALWWMB = PREVRESVALWWMB
+287        			COUNTRY_YEARUNITFOODPARAM_FLAG = PREVPARTITION
+288        			MINRESVAL = PREVMINRESVAL
+289        			MAXRESVAL = PREVMAXRESVAL
+290        			OVERLAPBINFLAG = PREVOVERLAPBINFLAG
+291        			OVERLAPCOUNT = PREVOVERLAPCOUNT
+292        			)) point=prevBinRow;
+293        
+294        		/* if other partition exit loop we do not compare bins of different partitions */
+295        		if ( COUNTRY_YEARUNITFOODPARAM_FLAG ^= PREVPARTITION ) then do;
+296        			leave;
+297        		end;
+298        
+299        		/* if the previous bin is finished then stop */
+300        		if ( PREVBIN ^= PREVBINFLAG ) then do;
+301        			leave;
+302        		end;
+303        			
+304        
+305        
+306        		/* here we have the prev bin elements, check if the threshold is ok */
+307        		if abs(PREVRESVALWWMB - RESVALWWMB) <= (MAXRESVAL - MINRESVAL)/&overlap_tolerance then do;
+308        			/* if new bin not present add to the flag */
+309        			if not ( find(OVERLAPBINFLAG, cats("$", PREVBINFLAG, "$") ) ge 1 ) then do;
+310        				OVERLAPBINFLAG = cats(OVERLAPBINFLAG, "$", PREVBINFLAG, "$");
+311        				OVERLAPCOUNT = OVERLAPCOUNT + 1;
+312        			end;
+313        		end;
+314        		else do;
+315        			leave; /* exit bin loop if threshold is not satisfied (next elements are farther, no check is needed) */
+316        		end;
+317        
+318        		prevBinRow = prevBinRow - 1;
+319        	end; /* END PREV BIN WHILE ITERATOR */
+320        run;
+
+NOTE: There were 891107 observations read from the data set MYLIB.PARTITION_BIN_FLAGS.
+NOTE: The data set MYLIB.PARTITION_BIN_FLAGS has 891107 observations and 12 variables.
+NOTE: Compressing data set MYLIB.PARTITION_BIN_FLAGS decreased size by 74.27 percent. 
+      Compressed is 4095 pages; un-compressed would require 15913 pages.
+NOTE: DATA statement used (Total process time):
+      real time           2:44.69
+      cpu time            2:39.40
+      
+
+321        
+322        /* diagnostic of overlapping percentage */
+323        data _null_;
+324            set myLib.PARTITION_BIN_FLAGS nobs=nobs;
+325            retain sum 0;
+326        	sum = sum + OVERLAPCOUNT;
+327            if _n_ = nobs then do;
+328        		percentage = 100 * sum / (2*nobs);
+329        		putlog 'NOTE: overlap ' percentage='%';
+330        	end;
+331        run;
+
+NOTE: overlap percentage=29.983155783 %
+NOTE: There were 891107 observations read from the data set MYLIB.PARTITION_BIN_FLAGS.
+NOTE: DATA statement used (Total process time):
+7                                                       The SAS System                         14:08 Wednesday, August 30, 2017
+
+      real time           3.44 seconds
+      cpu time            0.71 seconds
+      
+
+332        
+333        
+334        
+335        /* Split the overlap flag into three pieces */
+336        data myLib.PARTITION_BIN_FLAGS;
+337        	set myLib.PARTITION_BIN_FLAGS;
+338        	OVERLAPBINFLAGSPLIT1=input(scan(OVERLAPBINFLAG, 1, '$'), 8.);
+339        	OVERLAPBINFLAGSPLIT2=input(scan(OVERLAPBINFLAG, 2, '$'), 8.);
+340        	OVERLAPBINFLAGSPLIT3=input(scan(OVERLAPBINFLAG, 3, '$'), 8.);
+341        run;
+
+NOTE: There were 891107 observations read from the data set MYLIB.PARTITION_BIN_FLAGS.
+NOTE: The data set MYLIB.PARTITION_BIN_FLAGS has 891107 observations and 15 variables.
+NOTE: Compressing data set MYLIB.PARTITION_BIN_FLAGS decreased size by 72.27 percent. 
+      Compressed is 4752 pages; un-compressed would require 17137 pages.
+NOTE: DATA statement used (Total process time):
+      real time           8.47 seconds
+      cpu time            2.40 seconds
+      
+
+342        
+343        
+344        /* notify user with number of duplicates created */
+345        data _null_;
+346        	set myLib.PARTITION_BIN_FLAGS nobs=nobs;
+347        	putlog 'NOTE: Records before replicating rows for binning with overlap ' nobs=;
+348        	stop;
+349        run;
+
+NOTE: Records before replicating rows for binning with overlap nobs=891107
+NOTE: There were 1 observations read from the data set MYLIB.PARTITION_BIN_FLAGS.
+NOTE: DATA statement used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.00 seconds
+      
+
+350        
+351        /* duplicate the overlapping rows in order to assign them to different bins */
+352        data myLib.PARTITION_BIN_FLAGS;
+353        	set myLib.PARTITION_BIN_FLAGS;
+354        
+355        	output;
+356        
+357        	if(OVERLAPBINFLAGSPLIT2 ^= .) then do;
+358        		BINFLAG = OVERLAPBINFLAGSPLIT2;
+359        		output;
+360        	end;
+361        
+362        	if(OVERLAPBINFLAGSPLIT3 ^= .) then do;
+363        		BINFLAG = OVERLAPBINFLAGSPLIT3;
+364        		output;
+365        	end;
+366        run;
+
+NOTE: There were 891107 observations read from the data set MYLIB.PARTITION_BIN_FLAGS.
+NOTE: The data set MYLIB.PARTITION_BIN_FLAGS has 1425471 observations and 15 variables.
+NOTE: Compressing data set MYLIB.PARTITION_BIN_FLAGS decreased size by 71.76 percent. 
+      Compressed is 7741 pages; un-compressed would require 27414 pages.
+NOTE: DATA statement used (Total process time):
+      real time           11.68 seconds
+      cpu time            2.76 seconds
+      
+
+367        
+8                                                       The SAS System                         14:08 Wednesday, August 30, 2017
+
+368        data _null_;
+369        	set myLib.PARTITION_BIN_FLAGS nobs=nobs;
+370        	putlog 'NOTE: Records AFTER replicating rows for binning with overlap ' nobs=;
+371        	stop;
+372        run;
+
+NOTE: Records AFTER replicating rows for binning with overlap nobs=1425471
+NOTE: There were 1 observations read from the data set MYLIB.PARTITION_BIN_FLAGS.
+NOTE: DATA statement used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.00 seconds
+      
+
+373        
+374        
+375        
+376        /* Concatenate partition flag and bin flag in order to get a unique ID for each partition */
+377        data myLib.PARTITION_BIN_FLAGS;
+378        	set myLib.PARTITION_BIN_FLAGS;
+379        	PARTITION_ID_TEMP = input( cats( COUNTRY_YEARUNITFOODPARAM_FLAG, BINFLAG ), 8. );
+380        run;
+
+NOTE: There were 1425471 observations read from the data set MYLIB.PARTITION_BIN_FLAGS.
+NOTE: The data set MYLIB.PARTITION_BIN_FLAGS has 1425471 observations and 16 variables.
+NOTE: Compressing data set MYLIB.PARTITION_BIN_FLAGS decreased size by 70.48 percent. 
+      Compressed is 8251 pages; un-compressed would require 27951 pages.
+NOTE: DATA statement used (Total process time):
+      real time           16.02 seconds
+      cpu time            4.68 seconds
+      
+
+381        
+382        
+383        proc sort data=myLib.PARTITION_BIN_FLAGS;
+384        	by PARTITION_ID_TEMP;
+385        run;
+
+NOTE: There were 1425471 observations read from the data set MYLIB.PARTITION_BIN_FLAGS.
+NOTE: The data set MYLIB.PARTITION_BIN_FLAGS has 1425471 observations and 16 variables.
+NOTE: Compressing data set MYLIB.PARTITION_BIN_FLAGS decreased size by 70.48 percent. 
+      Compressed is 8251 pages; un-compressed would require 27951 pages.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           14.50 seconds
+      cpu time            4.24 seconds
+      
+
+386        
+387        
+388        data _null_;
+389        	putlog 'NOTE: Creating final PARTITION_ID field';
+390        run;
+
+NOTE: Creating final PARTITION_ID field
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+391        
+392        /* Set the partition id as a number starting from 1 to n */
+393        data myLib.PARTITION_BIN_FLAGS(drop=COUNTRY_YEARUNITFOODPARAM_FLAG BINFLAG NEXTBIN NEXTBINSTART PREVBIN PREVBINEND
+393      ! OVERLAPBINFLAG
+394        					OVERLAPCOUNT OVERLAPBINFLAGSPLIT1 OVERLAPBINFLAGSPLIT2 OVERLAPBINFLAGSPLIT3 PARTITION_ID_TEMP );
+395        	set myLib.PARTITION_BIN_FLAGS;
+396        	by PARTITION_ID_TEMP;
+397        	retain PARTITION_ID 0;
+398        	if first.PARTITION_ID_TEMP then PARTITION_ID = PARTITION_ID+1;
+399        run;
+9                                                       The SAS System                         14:08 Wednesday, August 30, 2017
+
+
+NOTE: There were 1425471 observations read from the data set MYLIB.PARTITION_BIN_FLAGS.
+NOTE: The data set MYLIB.PARTITION_BIN_FLAGS has 1425471 observations and 5 variables.
+NOTE: Compressing data set MYLIB.PARTITION_BIN_FLAGS increased size by 7.05 percent. 
+      Compressed is 15109 pages; un-compressed would require 14114 pages.
+NOTE: DATA statement used (Total process time):
+      real time           12.46 seconds
+      cpu time            2.63 seconds
+      
+
+400        
+401        
+402        /* Join the values with the training set */
+403        
+404        proc sort data=myLib.PARTITION_BIN_FLAGS;
+405        	by ID;
+406        run;
+
+NOTE: There were 1425471 observations read from the data set MYLIB.PARTITION_BIN_FLAGS.
+NOTE: The data set MYLIB.PARTITION_BIN_FLAGS has 1425471 observations and 5 variables.
+NOTE: Compressing data set MYLIB.PARTITION_BIN_FLAGS increased size by 6.98 percent. 
+      Compressed is 15099 pages; un-compressed would require 14114 pages.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           14.68 seconds
+      cpu time            2.65 seconds
+      
+
+407        proc sort data=&trn_table;
+408        	by ID;
+409        run;
+
+NOTE: There were 891107 observations read from the data set MYLIB.TRN_SET_2015.
+NOTE: The data set MYLIB.TRN_SET_2015 has 891107 observations and 118 variables.
+NOTE: Compressing data set MYLIB.TRN_SET_2015 decreased size by 93.28 percent. 
+      Compressed is 59867 pages; un-compressed would require 891107 pages.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           1:53.58
+      cpu time            54.27 seconds
+      
+
+410        
+411        data &trn_table (drop=BINFLAG);
+412        	merge &trn_table myLib.PARTITION_BIN_FLAGS(IN=in);
+413        	by ID;
+414        	if (in) then output;
+415        run;
+
+NOTE: MERGE statement has more than one data set with repeats of BY values.
+NOTE: There were 891107 observations read from the data set MYLIB.TRN_SET_2015.
+NOTE: There were 1425471 observations read from the data set MYLIB.PARTITION_BIN_FLAGS.
+NOTE: The data set MYLIB.TRN_SET_2015 has 1425471 observations and 118 variables.
+NOTE: Compressing data set MYLIB.TRN_SET_2015 decreased size by 93.13 percent. 
+      Compressed is 97975 pages; un-compressed would require 1425471 pages.
+NOTE: DATA statement used (Total process time):
+      real time           2:47.68
+      cpu time            47.90 seconds
+      
+
+416        
+417        /* remove temporary table */
+418        proc sql;
+419        	drop table myLib.PARTITION_BIN_FLAGS;
+NOTE: Table MYLIB.PARTITION_BIN_FLAGS has been dropped.
+420        run;
+NOTE: PROC SQL statements are executed immediately; The RUN statement has no effect.
+421        
+422        GOPTIONS NOACCESSIBLE;
+423        %LET _CLIENTTASKLABEL=;
+10                                                      The SAS System                         14:08 Wednesday, August 30, 2017
+
+424        %LET _CLIENTPROJECTPATH=;
+425        %LET _CLIENTPROJECTNAME=;
+426        %LET _SASPROGRAMFILE=;
+427        
+428        ;*';*";*/;quit;
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.00 seconds
+      
+428      !                run;
+
+429        ODS _ALL_ CLOSE;
+430        
+431        
+432        QUIT; RUN;
+433        

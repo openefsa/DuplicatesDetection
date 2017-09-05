@@ -1,0 +1,315 @@
+1                                                       The SAS System                          09:45 Thursday, August 31, 2017
+
+1          ;*';*";*/;quit;run;
+2          OPTIONS PAGENO=MIN;
+3          %LET _CLIENTTASKLABEL='Data Model';
+4          %LET _CLIENTPROJECTPATH='C:\Users\avonva\Desktop\Pairs on DWH.egp';
+5          %LET _CLIENTPROJECTNAME='Pairs on DWH.egp';
+6          %LET _SASPROGRAMFILE=;
+7          
+8          ODS _ALL_ CLOSE;
+9          OPTIONS DEV=ACTIVEX;
+10         GOPTIONS XPIXELS=0 YPIXELS=0;
+11         FILENAME EGSR TEMP;
+12         ODS tagsets.sasreport13(ID=EGSR) FILE=EGSR STYLE=HtmlBlue
+12       ! STYLESHEET=(URL="file:///C:/Program%20Files/SASHome/x86/SASEnterpriseGuide/5.1/Styles/HtmlBlue.css") NOGTITLE
+12       ! NOGFOOTNOTE GPATH=&sasworklocation ENCODING=UTF8 options(rolap="on");
+NOTE: Writing TAGSETS.SASREPORT13(EGSR) Body file: EGSR
+13         
+14         GOPTIONS ACCESSIBLE;
+15         /*
+16          * @author Avon Valentino, Crt Sustar - August 2017
+17          *
+18          * Model which detects the duplicates using the distances
+19          */
+20         
+21         %let pairs_table = myLib.TRN_PAIRS_2015;
+22         
+23         /* dataset which will contains the duplicates candidates */
+24         %let output = &pairs_table.duplicates;
+25         %let pairs_table_name=%qscan(&pairs_table,2,%str(.)); *remove myLib from the macro variable;
+26         %let dataQuoted = "&pairs_table_name";
+27         
+28         %let threshold = 0.5; /* duplicates threshold, a record with weighted distance <= threshold is considered a
+28       ! duplicate */
+29         
+30         /**
+31         * Count the number of distances which are equal to "number" for the current record of a data step.
+32         */
+33         %macro countDistancesEqualTo(dists /* macro list (space separated). It contains the names of columns which are taken
+33       !  into account */,
+34         	number /* target number, we count distances equal to this */,
+35         	columnName /* name of the column which will contain the counter */);
+36         
+37         	&columnName = 0;
+38         
+39         	%local i counter;
+40         
+41         	/* count number of distances = number */
+42         	%let i=1;
+43         	%do %while (%scan(&dists, &i) ne );
+44         
+45         		%let current = %scan(&dists, &i);
+46         
+47         		if(&current = &number) then do;
+48         			&columnName = &columnName + 1;
+49         		end;
+50         
+51         		%let i = %eval(&i + 1);
+52         	%end;
+53         %mend;
+54         
+55         /**
+56         * Only for DATA STEPS!
+57         * Compute the weighted distance given an Nx3 array of weights. Each element of the array contains:
+58         * - a column name of the distance which is contained in the dataset of the data step
+59         * - a weight which is applied if the distance related to the column is not 0, 0.5 or 0.25 (mismatch)
+60         * - (optional) a weight which is applied if the distance related to the column is equal to 0 (match),
+61         *   If not set this is equal to 0.
+62         * Examples:
+63         * a[1,1] = MYDIST; a[1,2] = 1; (cost of mismatch) a[1,3] = 1; (reward of match)
+2                                                       The SAS System                          09:45 Thursday, August 31, 2017
+
+64         * a[2,1] = MYDIST2; a[2,2] = 1; (cost of mismatch, reward is by default 0)
+65         */
+66         %macro getWeightedDistance(weights /* Nx3 array, each row contains: DISTANCE_COLUMN_NAME (dataset column to
+66       ! consider), mismatch_cost, match_reward (optional, default 0)*/,
+67         	columnName /* name of the column which will contain the weighted distance */);
+68         
+69         	&columnName = 0;
+70         
+71         	/* compute weighted distance */
+72         	do i=1 to dim1(weights);
+73         		/*if unknown value => skip */
+74         		if(weights[i,1] ^= 0.5) then do;
+75         
+76         			/* if equal subtract error from distance */
+77         			if(weights[i,1] = 0) then do;
+78         				if ( weights[i,3] ^= . ) then do; /*if weight was defined remove something using gain weight*/
+79         					&columnName = &columnName + -1 * weights[i,3];
+80         				end;
+81         			end;
+82         			
+83         			/* if one contained into the other just add 0.25 */
+84         			else if (weights[i,1] = 0.25) then do;
+85         				&columnName = &columnName + 0.25;
+86         			end;
+87         			else do; /* compute error using loss weight */
+88         				&columnName = &columnName + weights[i,1] * weights[i,2];
+89         			end;
+90         		end;
+91         	end;
+92         
+93         	drop i;
+94         %mend;
+95         
+96         /* Get all the relevant distances variables, space separated */
+97         proc sql noprint;
+98         	select name into :relevantDists separated by ' '
+99         	from dictionary.columns
+100        	where memname = upcase(&dataQuoted)
+101        	and upcase(name) like '%_DIST'
+102        	and upcase(name) not in ('FILENAME_DIST', 'LABSAMPLE_KEY_ID_DIST',
+103        		'ORIGFISHAREACODE_HIER_DIST', 'ORIGFISHAREATEXT_GED_DIST',
+104        		'ANMETHCODE_HIER_DIST', 'ANMETHTEXT_GED_DIST', 'RESULTCODE_DIST', 'LABSAMPLECODE_DIST' );
+NOTE: Due to the PRESERVE_TAB_NAMES=NO libname option setting, 14 table(s) have not been displayed/returned.
+NOTE: Due to the PRESERVE_TAB_NAMES=NO libname option setting, 24 table(s) have not been displayed/returned.
+105        quit;
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           2.18 seconds
+      cpu time            0.14 seconds
+      
+
+106        
+107        
+108        /* Aggregate the distances with average and weighted average */
+109        data &output;
+110        
+111        	set &pairs_table;
+112        
+113        	/* count how many distances are equal to 1,0 and unknown */
+114        	%countDistancesEqualTo(&relevantDists, 1, DIST_1_COUNT);
+115        	%countDistancesEqualTo(&relevantDists, 0, DIST_0_COUNT);
+116        	%countDistancesEqualTo(&relevantDists, 0.25, DIST_025_COUNT);
+117        	%countDistancesEqualTo(&relevantDists, 0.5, DIST_05_COUNT);
+118        
+119        	array weights{56,3} _temporary_;
+120        	weights[1,1] = LABSAMPCODEFLAT_DIST;
+121        	weights[1,2] = 3; weights[1,3] = 3;
+122        	weights[2,1] = LABSUBSAMPCODE_DIST;
+123        	weights[2,2] = 1;
+3                                                       The SAS System                          09:45 Thursday, August 31, 2017
+
+124        	weights[3,1] = LANG_DIST;
+125        	weights[3,2] = 1;
+126        	weights[4,1] = SAMPAREA_HIER_DIST;
+127        	weights[4,2] = 1;
+128        	weights[5,1] = ORIGCOUNTRY_DIST;
+129        	weights[5,2] = 1;
+130        	weights[6,1] = ORIGAREA_HIER_DIST;
+131        	weights[6,2] = 1;
+132        	weights[7,1] = ORIGFISHAREACOMB_GED_DIST;
+133        	weights[7,2] = 1;
+134        	weights[8,1] = PROCCOUNTRY_DIST;
+135        	weights[8,2] = 1;
+136        	weights[9,1] = PROCAREA_HIER_DIST;
+137        	weights[9,2] = 1;
+138        	weights[10,1] = PRODTEXT_GED_DIST;
+139        	weights[10,2] = 1;
+140        	weights[11,1] = PRODMETH_DIST;
+141        	weights[11,2] = 1;
+142        	weights[12,1] = PRODPACK_DIST;
+143        	weights[12,2] = 1;
+144        	weights[13,1] = PRODTREAT_HIER_DIST;
+145        	weights[13,2] = 1;
+146        	weights[14,1] = PRODBRANDNAME_GED_DIST;
+147        	weights[14,2] = 1;
+148        	weights[15,1] = PRODMANUF_GED_DIST;
+149        	weights[15,2] = 1;
+150        	weights[16,1] = PRODCOM_GED_DIST;
+151        	weights[16,2] = 1;
+152        	weights[17,1] = PRODY_DIST;
+153        	weights[17,2] = 1;
+154        	weights[18,1] = PRODM_DIST;
+155        	weights[18,2] = 1;
+156        	weights[19,1] = PRODD_DIST;
+157        	weights[19,2] = 1;
+158        	weights[20,1] = EXPIRY_DIST;
+159        	weights[20,2] = 1;
+160        	weights[21,1] = EXPIRD_DIST;
+161        	weights[21,2] = 1;
+162        	weights[22,1] = SAMPY_DIST;
+163        	weights[22,2] = 1;
+164        	weights[23,1] = SAMPM_DIST;
+165        	weights[23,2] = 1;
+166        	weights[24,1] = SAMPD_DIST;
+167        	weights[24,2] = 1;
+168        	weights[25,1] = ANALYSISY_DIST;
+169        	weights[25,2] = 1;
+170        	weights[26,1] = ANALYSISM_DIST;
+171        	weights[26,2] = 1;
+172        	weights[27,1] = ANALYSISD_DIST;
+173        	weights[27,2] = 1;
+174        	weights[28,1] = PROGCODE_GED_DIST;
+175        	weights[28,2] = 1;
+176        	weights[29,1] = PROGLEGALREF_GED_DIST;
+177        	weights[29,2] = 1;
+178        	weights[30,1] = PROGSAMPSTRATEGY_DIST;
+179        	weights[30,2] = 1;
+180        	weights[31,1] = PROGTYPE_HIER_DIST;
+181        	weights[31,2] = 1;
+182        	weights[32,1] = SAMPMETHOD_HIER_DIST;
+183        	weights[32,2] = 1;
+184        	weights[33,1] = SAMPLENUM_DIST;
+185        	weights[33,2] = 1;
+186        	weights[34,1] = LOTSIZE_DIST;
+187        	weights[34,2] = 1;
+188        	weights[35,1] = SAMPPOINT_HIER_DIST;
+189        	weights[35,2] = 1;
+190        	weights[36,1] = LABCODE_DIST;
+191        	weights[36,2] = 1;
+4                                                       The SAS System                          09:45 Thursday, August 31, 2017
+
+192        	weights[37,1] = LABCOUNTRY_DIST;
+193        	weights[37,2] = 1;
+194        	weights[38,1] = LOCALORG_GED_DIST;
+195        	weights[38,2] = 1;
+196        	weights[39,1] = LOCALORGCOUNTRY_DIST;
+197        	weights[39,2] = 1;
+198        	weights[40,1] = RESULTCODEFLAT_DIST;
+199        	weights[40,2] = 3; weights[40,3] = 3;
+200        	weights[41,1] = PARAMTEXT_GED_DIST;
+201        	weights[41,2] = 1;
+202        	weights[42,1] = PARAMTYPE_DIST;
+203        	weights[42,2] = 1;
+204        	weights[43,1] = ANMETHREFCODE_GED_DIST;
+205        	weights[43,2] = 1;
+206        	weights[44,1] = ANMETHCOMB_GED_DIST;
+207        	weights[44,2] = 1;
+208        	weights[45,1] = RESLOD_DIST;
+209        	weights[45,2] = 1;
+210        	weights[46,1] = RESLOQ_DIST;
+211        	weights[46,2] = 1;
+212        	weights[47,1] = RESVALUNCERT_DIST;
+213        	weights[47,2] = 1;
+214        	weights[48,1] = MOISTPERC_DIST;
+215        	weights[48,2] = 1;
+216        	weights[49,1] = FATPERC_DIST;
+217        	weights[49,2] = 1;
+218        	weights[50,1] = EXPRRES_DIST;
+219        	weights[50,2] = 1;
+220        	weights[51,1] = RESQUALVALUE_DIST;
+221        	weights[51,2] = 1;
+222        	weights[52,1] = RESTYPE_DIST;
+223        	weights[52,2] = 1;
+224        	weights[51,1] = RESLEGALLIMIT_DIST;
+225        	weights[51,2] = 1;
+226        	weights[52,1] = RESLEGALLIMITTYPE_DIST;
+227        	weights[52,2] = 1;
+228        	weights[53,1] = RESEVALUATION_DIST;
+229        	weights[53,2] = 1;
+230        	weights[54,1] = ACTTAKENCODE_DIST;
+231        	weights[54,2] = 1;
+232        	weights[55,1] = RESCOMM_GED_DIST;
+233        	weights[55,2] = 1;
+234        	weights[56,1] = PRODINGRED_GED_DIST;
+235        	weights[56,2] = 1;
+236        
+237        	%getWeightedDistance(weights, WEIGHTED_DIST);
+238        
+239        	/* label records as duplicates if the distance is below the threshold */
+240        	if WEIGHTED_DIST <= &threshold then
+241        	do;
+242        		DUPLICATES = 1;
+243        	end;
+244        	else do;
+245        		DUPLICATES = 0;
+246        	end;
+247        run;
+
+NOTE: There were 8685882 observations read from the data set MYLIB.TRN_PAIRS_2015.
+NOTE: The data set MYLIB.TRN_PAIRS_2015DUPLICATES has 8685882 observations and 90 variables.
+NOTE: Compressing data set MYLIB.TRN_PAIRS_2015DUPLICATES decreased size by 63.78 percent. 
+      Compressed is 196614 pages; un-compressed would require 542869 pages.
+NOTE: DATA statement used (Total process time):
+      real time           4:29.00
+      cpu time            2:26.15
+      
+
+248        
+249        /*
+5                                                       The SAS System                          09:45 Thursday, August 31, 2017
+
+250        
+251        REST request to google translate to translate free text from different languages
+252        into english. It needs a google API KEY (in the code it is missing) to work.
+253        see https://cloud.google.com/translate/docs/auth
+254        
+255        filename data temp;
+256        data _null_;
+257           file data;
+258           put "{";
+259           put "'q': 'Wurzmischung mit Glutamat mit Gewurzzusatz/Gewurzextr.',";
+260           put "'target': 'en'";
+261           put "}";
+262        run;
+263        filename resp temp;
+264        proc http in=data out=out url="https://translation.googleapis.com/language/translate/v2"
+265             method="post"
+266             ct="application/JSON"
+267        	 out=resp;
+268        run;
+269        */
+270        
+271        GOPTIONS NOACCESSIBLE;
+272        %LET _CLIENTTASKLABEL=;
+273        %LET _CLIENTPROJECTPATH=;
+274        %LET _CLIENTPROJECTNAME=;
+275        %LET _SASPROGRAMFILE=;
+276        
+277        ;*';*";*/;quit;run;
+278        ODS _ALL_ CLOSE;
+279        
+280        
+281        QUIT; RUN;
+282        

@@ -1,0 +1,294 @@
+﻿1                                                       The SAS System                          09:45 Thursday, August 31, 2017
+
+1          ;*';*";*/;quit;run;
+2          OPTIONS PAGENO=MIN;
+3          %LET _CLIENTTASKLABEL='String preprocessing';
+4          %LET _CLIENTPROJECTPATH='C:\Users\avonva\Desktop\Pairs on DWH.egp';
+5          %LET _CLIENTPROJECTNAME='Pairs on DWH.egp';
+6          %LET _SASPROGRAMFILE=;
+7          
+8          ODS _ALL_ CLOSE;
+9          OPTIONS DEV=ACTIVEX;
+10         GOPTIONS XPIXELS=0 YPIXELS=0;
+11         FILENAME EGSR TEMP;
+12         ODS tagsets.sasreport13(ID=EGSR) FILE=EGSR STYLE=HtmlBlue
+12       ! STYLESHEET=(URL="file:///C:/Program%20Files/SASHome/x86/SASEnterpriseGuide/5.1/Styles/HtmlBlue.css") NOGTITLE
+12       ! NOGFOOTNOTE GPATH=&sasworklocation ENCODING=UTF8 options(rolap="on");
+NOTE: Writing TAGSETS.SASREPORT13(EGSR) Body file: EGSR
+13         
+14         GOPTIONS ACCESSIBLE;
+15         
+16         options cmplib=myLib.funcs;
+17         
+18         /* Remove all the special characters from a string */
+19         proc fcmp outlib=myLib.funcs.stringsPreproc;
+WARNING: Function 'removeSpecialCharacters' was defined in a previous package. 'removeSpecialCharacters' in current package 
+         DISTANCES will be used as default when the package name is not specified.
+WARNING: Function 'removeAccents' was defined in a previous package. 'removeAccents' in current package DISTANCES will be used 
+         as default when the package name is not specified.
+20         function removeSpecialCharacters(string $) $1000;
+WARNING: Function 'removeSpecialCharacters' was defined in a previous package. Function 'removeSpecialCharacters' as defined 
+         in the current program will be used as default when the package is not specified.
+21         	return( compress(string, '!“#$%&‘()*+,./:;<=>?@[\]^-_`{|}~') );
+22         endsub;
+23         quit;
+
+NOTE: Function removeSpecialCharacters saved to myLib.funcs.stringsPreproc.
+NOTE: PROCEDURE FCMP used (Total process time):
+      real time           0.46 seconds
+      cpu time            0.09 seconds
+      
+
+24         
+25         /**
+26          * Remove all the unicode accents from the input string
+27          * @param string the string which needs to be cleaned from accents
+28          * @return a flat string without accents
+29          */
+30         proc fcmp outlib=myLib.funcs.stringsPreproc;
+WARNING: Function 'removeSpecialCharacters' was defined in a previous package. 'removeSpecialCharacters' in current package 
+         STRINGSPREPROC will be used as default when the package name is not specified.
+WARNING: Function 'removeAccents' was defined in a previous package. 'removeAccents' in current package STRINGSPREPROC will be 
+         used as default when the package name is not specified.
+31         function removeAccents(string $) $1000;
+WARNING: Function 'removeAccents' was defined in a previous package. Function 'removeAccents' as defined in the current 
+         program will be used as default when the package is not specified.
+32         
+33         	/* skip NA values */
+34         	if ( string = 'N_A' or string = "" ) then do;
+35         		return(string);
+36         	end;
+37         
+38         	length normalizedString $ 1000;
+39         	normalizedString = string;
+40         
+41         	array accentedLetters[73] $8;
+42         	accentedLetters[1]="Č";
+43         	accentedLetters[2]="č";
+44         	accentedLetters[3]="Š";
+45         	accentedLetters[4]="š";
+46         	accentedLetters[5]="Ž";
+2                                                       The SAS System                          09:45 Thursday, August 31, 2017
+
+47         	accentedLetters[6]="ž";
+48         	accentedLetters[7]="Ć";
+49         	accentedLetters[8]="ć";
+50         	accentedLetters[9]="À";
+51         	accentedLetters[10]="Á";
+52         	accentedLetters[11]="Â";
+53         	accentedLetters[12]="Ã";
+54         	accentedLetters[13]="Ä";
+55         	accentedLetters[14]="Å";
+56         	accentedLetters[15]="Ç";
+57         	accentedLetters[16]="È";
+58         	accentedLetters[17]="É";
+59         	accentedLetters[18]="Ê";
+60         	accentedLetters[19]="Ë";
+61         	accentedLetters[20]="Ì";
+62         	accentedLetters[21]="Í";
+63         	accentedLetters[22]="Î";
+64         	accentedLetters[23]="Ï";
+65         	accentedLetters[24]="Ñ";
+66         	accentedLetters[25]="Ò";
+67         	accentedLetters[26]="Ó";
+68         	accentedLetters[27]="Ô";
+69         	accentedLetters[28]="Õ";
+70         	accentedLetters[29]="Ö";
+71         	accentedLetters[30]="Ø";
+72         	accentedLetters[31]="Ù";
+73         	accentedLetters[32]="Ú";
+74         	accentedLetters[33]="Û";
+75         	accentedLetters[34]="Ü";
+76         	accentedLetters[35]="Ý";
+77         	accentedLetters[36]="à";
+78         	accentedLetters[37]="á";
+79         	accentedLetters[38]="â";
+80         	accentedLetters[39]="ã";
+81         	accentedLetters[40]="ä";
+82         	accentedLetters[41]="å";
+83         	accentedLetters[42]="ç";
+84         	accentedLetters[43]="è";
+85         	accentedLetters[44]="é";
+86         	accentedLetters[45]="ê";
+87         	accentedLetters[46]="ë";
+88         	accentedLetters[47]="ì";
+89         	accentedLetters[48]="í";
+90         	accentedLetters[49]="î";
+91         	accentedLetters[50]="ï";
+92         	accentedLetters[51]="ñ";
+93         	accentedLetters[52]="ò";
+94         	accentedLetters[53]="ó";
+95         	accentedLetters[54]="ô";
+96         	accentedLetters[55]="õ";
+97         	accentedLetters[56]="ö";
+98         	accentedLetters[57]="ø";
+99         	accentedLetters[58]="ù";
+100        	accentedLetters[59]="ú";
+101        	accentedLetters[60]="û";
+102        	accentedLetters[61]="ü";
+103        	accentedLetters[62]="ý";
+104        	accentedLetters[63]="ÿ";
+105        	accentedLetters[64]="ř";
+106        	accentedLetters[65]="ě";
+107        	accentedLetters[66]="ň";
+108        	accentedLetters[67]="Ř";
+109        	accentedLetters[68]="ř";
+110        	accentedLetters[69]="Ě";
+111        	accentedLetters[70]="ĺ";
+112        	accentedLetters[71]="Ĺ";
+113        	accentedLetters[72]="ů";
+114        	accentedLetters[73]="ß";
+3                                                       The SAS System                          09:45 Thursday, August 31, 2017
+
+115        
+116        
+117        	array standardLetters[73] $1;
+118        	standardLetters[1]="C";
+119        	standardLetters[2]="c";
+120        	standardLetters[3]="S";
+121        	standardLetters[4]="s";
+122        	standardLetters[5]="Z";
+123        	standardLetters[6]="z";
+124        	standardLetters[7]="C";
+125        	standardLetters[8]="c";
+126        	standardLetters[9]="A";
+127        	standardLetters[10]="A";
+128        	standardLetters[11]="A";
+129        	standardLetters[12]="A";
+130        	standardLetters[13]="A";
+131        	standardLetters[14]="A";
+132        	standardLetters[15]="C";
+133        	standardLetters[16]="E";
+134        	standardLetters[17]="E";
+135        	standardLetters[18]="E";
+136        	standardLetters[19]="E";
+137        	standardLetters[20]="I";
+138        	standardLetters[21]="I";
+139        	standardLetters[22]="I";
+140        	standardLetters[23]="I";
+141        	standardLetters[24]="N";
+142        	standardLetters[25]="O";
+143        	standardLetters[26]="O";
+144        	standardLetters[27]="O";
+145        	standardLetters[28]="O";
+146        	standardLetters[29]="O";
+147        	standardLetters[30]="O";
+148        	standardLetters[31]="U";
+149        	standardLetters[32]="U";
+150        	standardLetters[33]="U";
+151        	standardLetters[34]="U";
+152        	standardLetters[35]="Y";
+153        	standardLetters[36]="a";
+154        	standardLetters[37]="a";
+155        	standardLetters[38]="a";
+156        	standardLetters[39]="a";
+157        	standardLetters[40]="a";
+158        	standardLetters[41]="a";
+159        	standardLetters[42]="c";
+160        	standardLetters[43]="e";
+161        	standardLetters[44]="e";
+162        	standardLetters[45]="e";
+163        	standardLetters[46]="e";
+164        	standardLetters[47]="i";
+165        	standardLetters[48]="i";
+166        	standardLetters[49]="i";
+167        	standardLetters[50]="i";
+168        	standardLetters[51]="n";
+169        	standardLetters[52]="o";
+170        	standardLetters[53]="o";
+171        	standardLetters[54]="o";
+172        	standardLetters[55]="o";
+173        	standardLetters[56]="o";
+174        	standardLetters[57]="o";
+175        	standardLetters[58]="u";
+176        	standardLetters[59]="u";
+177        	standardLetters[60]="u";
+178        	standardLetters[61]="u";
+179        	standardLetters[62]="y";
+180        	standardLetters[63]="y";
+181        	standardLetters[64]="r";
+182        	standardLetters[65]="e";
+4                                                       The SAS System                          09:45 Thursday, August 31, 2017
+
+183        	standardLetters[66]="n";
+184        	standardLetters[67]="R";
+185        	standardLetters[68]="r";
+186        	standardLetters[69]="E";
+187        	standardLetters[70]="l";
+188        	standardLetters[71]="L";
+189        	standardLetters[72]="u";
+190        	standardLetters[73]="b";
+191        
+192        
+193        	/* remove accents one by one */
+194        	do i = 1 to (dim(accentedLetters));
+195        		accent = accentedLetters[i];
+196        		standardLetter = standardLetters[i];
+197        		normalizedString = tranwrd( normalizedString, trim(accent), trim(standardLetter) );
+198        	end;
+199        
+200        	return( trim(normalizedString) );
+201        endsub;
+202        quit;
+
+NOTE: Function removeAccents saved to myLib.funcs.stringsPreproc.
+NOTE: PROCEDURE FCMP used (Total process time):
+      real time           0.73 seconds
+      cpu time            0.03 seconds
+      
+
+203        
+204        
+205        /* Remove accents from all the free text fields (very long operation, for 7 millions records 10 hours)
+206         * more over remove all the special characters from labsampcode and resultcode since we check the contains
+207         * property and sometimes the special characters give problems */
+208        data &trn_table;
+209        
+210        	set &trn_table;
+211        
+212        	ORIGFISHAREATEXT = removeAccents( ORIGFISHAREATEXT );
+WARNING: Function 'removeSpecialCharacters' was defined in a previous package. 'removeSpecialCharacters' in current package 
+         STRINGSPREPROC will be used as default when the package name is not specified.
+WARNING: Function 'removeAccents' was defined in a previous package. 'removeAccents' in current package STRINGSPREPROC will be 
+         used as default when the package name is not specified.
+213        	PRODTEXT = removeAccents( PRODTEXT );
+214        	PRODBRANDNAME = removeAccents( PRODBRANDNAME );
+215        	PRODMANUF = removeAccents( PRODMANUF );
+216        	PROGCODE = removeAccents( PROGCODE );
+217        	PROGLEGALREF = removeAccents( PROGLEGALREF );
+218        	LOCALORG = removeAccents( LOCALORG );
+219        	PARAMTEXT = removeAccents( PARAMTEXT );
+220        	ANMETHREFCODE = removeAccents( ANMETHREFCODE );
+221        	ANMETHTEXT = removeAccents( ANMETHTEXT );
+222        	RESCOMM = removeAccents( RESCOMM );
+223        	PRODCOM = removeAccents( PRODCOM );
+224        
+225        	/* remove special characters to make containDist more effective */
+226        	LABSAMPCODEFLAT = removeSpecialCharacters(LABSAMPCODE);
+227        	RESULTCODEFLAT = removeSpecialCharacters(RESULTCODE);
+228        run;
+
+NOTE: There were 673358 observations read from the data set MYLIB.TRN_SET_2012.
+NOTE: The data set MYLIB.TRN_SET_2012 has 673358 observations and 104 variables.
+NOTE: Compressing data set MYLIB.TRN_SET_2012 decreased size by 94.09 percent. 
+      Compressed is 39796 pages; un-compressed would require 673358 pages.
+NOTE: DATA statement used (Total process time):
+      real time           1:14:27.08
+      cpu time            1:13:21.94
+      
+
+229        
+5                                                       The SAS System                          09:45 Thursday, August 31, 2017
+
+230        GOPTIONS NOACCESSIBLE;
+231        %LET _CLIENTTASKLABEL=;
+232        %LET _CLIENTPROJECTPATH=;
+233        %LET _CLIENTPROJECTNAME=;
+234        %LET _SASPROGRAMFILE=;
+235        
+236        ;*';*";*/;quit;run;
+237        ODS _ALL_ CLOSE;
+238        
+239        
+240        QUIT; RUN;
+241        

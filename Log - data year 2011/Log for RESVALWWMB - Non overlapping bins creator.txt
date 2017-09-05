@@ -1,0 +1,257 @@
+1                                                       The SAS System                            11:24 Monday, August 28, 2017
+
+1          ;*';*";*/;quit;run;
+2          OPTIONS PAGENO=MIN;
+3          %LET _CLIENTTASKLABEL='RESVALWWMB - Non overlapping bins creator';
+4          %LET _CLIENTPROJECTPATH='C:\Users\avonva\Desktop\Pairs on DWH.egp';
+5          %LET _CLIENTPROJECTNAME='Pairs on DWH.egp';
+6          %LET _SASPROGRAMFILE=;
+7          
+8          ODS _ALL_ CLOSE;
+9          OPTIONS DEV=ACTIVEX;
+10         GOPTIONS XPIXELS=0 YPIXELS=0;
+11         FILENAME EGSR TEMP;
+12         ODS tagsets.sasreport13(ID=EGSR) FILE=EGSR STYLE=HtmlBlue
+12       ! STYLESHEET=(URL="file:///C:/Program%20Files/SASHome/x86/SASEnterpriseGuide/5.1/Styles/HtmlBlue.css") NOGTITLE
+12       ! NOGFOOTNOTE GPATH=&sasworklocation ENCODING=UTF8 options(rolap="on");
+NOTE: Writing TAGSETS.SASREPORT13(EGSR) Body file: EGSR
+13         
+14         GOPTIONS ACCESSIBLE;
+15         
+16         /*
+17          * @author Avon Valentino, Crt Sustar - August 2017
+18          *
+19          * Binning of RESVAL based on previously created partitions
+20          * Basically for each partition a set of subpartitions
+21          * are created based on the RESVALWWMB value of the record. A bin is created
+22          * using all the records which are close in term of RESVALWWMB. In particular, the smallest available element
+23          * of the partition is used as starting point of the current bin, then all the records which are close to it
+24          * are put in the bin. When no records can be put in the bin, another bin is created and the procedure is iterated
+25          * using as starting point the smallest available element of the partition which is not yet in a bin.
+26          * The partitions are independent, therefore the bins among different partitions are not correlated.
+27          */
+28         
+29         data _null_;
+30         	putlog 'NOTE: Partitioning based on RESVALWWB started';
+31         	putlog 'NOTE: Non overlapping bins are being created';
+32         run;
+
+NOTE: Partitioning based on RESVALWWB started
+NOTE: Non overlapping bins are being created
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+33         
+34         
+35         /* tolerance for creating bins (bigger values => less bins) */
+36         %let bin_tolerance = 1000;
+37         
+38         /*
+39          * Compute minimum and maximum RESVAL for each partition
+40          * (only based on resunit foodex code and param code, since the
+41          * other factors do not modify the RESVAL)
+42          */
+43         proc sql;
+44         	create table myLib.RESVALRANGES as
+45         	select RESUNIT, COUNTRY_FLAG, ANALYSISLEVEL1_ID, ID_L2,
+46         			MIN(RESVALWWMB) as MINRESVAL,
+47         			MAX(RESVALWWMB) as MAXRESVAL
+48         	from myLib.&trn_table
+49         	group by COUNTRY_FLAG, RESUNIT, ANALYSISLEVEL1_ID, ID_L2;
+NOTE: Compressing data set MYLIB.RESVALRANGES decreased size by 8.89 percent. 
+      Compressed is 41 pages; un-compressed would require 45 pages.
+NOTE: Table MYLIB.RESVALRANGES created, with 3721 rows and 6 columns.
+
+50         run;
+NOTE: PROC SQL statements are executed immediately; The RUN statement has no effect.
+51         
+52         /* Sort for merge */
+2                                                       The SAS System                            11:24 Monday, August 28, 2017
+
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           21.91 seconds
+      cpu time            4.75 seconds
+      
+53         proc sort data=myLib.RESVALRANGES;
+
+54         	by COUNTRY_FLAG RESUNIT ANALYSISLEVEL1_ID ID_L2;
+55         run;
+
+NOTE: Input data set is already sorted, no sorting done.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+56         
+57         proc sort data=myLib.&trn_table;
+58         	by COUNTRY_FLAG RESUNIT ANALYSISLEVEL1_ID ID_L2;
+59         run;
+
+NOTE: There were 874382 observations read from the data set MYLIB.DWH_SUBSET.
+NOTE: The data set MYLIB.DWH_SUBSET has 874382 observations and 111 variables.
+NOTE: Compressing data set MYLIB.DWH_SUBSET decreased size by 94.02 percent. 
+      Compressed is 52328 pages; un-compressed would require 874382 pages.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           2:10.49
+      cpu time            40.59 seconds
+      
+
+60         
+61         /* Add minimum and maximum information to the training set */
+62         data myLib.&trn_table;
+63         	merge myLib.RESVALRANGES myLib.&trn_table(IN=in);
+64         	by COUNTRY_FLAG RESUNIT ANALYSISLEVEL1_ID ID_L2;
+65         	if (in) then output;
+66         run;
+
+NOTE: There were 3721 observations read from the data set MYLIB.RESVALRANGES.
+NOTE: There were 874382 observations read from the data set MYLIB.DWH_SUBSET.
+NOTE: The data set MYLIB.DWH_SUBSET has 874382 observations and 113 variables.
+NOTE: Compressing data set MYLIB.DWH_SUBSET decreased size by 93.92 percent. 
+      Compressed is 53144 pages; un-compressed would require 874382 pages.
+NOTE: DATA statement used (Total process time):
+      real time           2:06.26
+      cpu time            18.95 seconds
+      
+
+67         
+68         
+69         /*
+70          * Sort by partition flag and resvalwwmb in order to execute a sequential scan
+71          * of the partitions records (allows efficient code)
+72          */
+73         proc sort data=myLib.&trn_table;
+74         	by COUNTRY_YEARUNITFOODPARAM_FLAG RESVALWWMB;
+75         run;
+
+NOTE: There were 874382 observations read from the data set MYLIB.DWH_SUBSET.
+NOTE: The data set MYLIB.DWH_SUBSET has 874382 observations and 113 variables.
+NOTE: Compressing data set MYLIB.DWH_SUBSET decreased size by 93.93 percent. 
+      Compressed is 53085 pages; un-compressed would require 874382 pages.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           2:14.12
+      cpu time            40.93 seconds
+      
+
+76         
+77         
+3                                                       The SAS System                            11:24 Monday, August 28, 2017
+
+78         /*
+79          * Compute for each partition a set of bins (i.e. sub partitions). In particular, given a sorted
+80          * dataset (to simplify code and speed up the process) by the partition flag and the RESVALWWMB, we create the bins
+81          * using an iterative procedure:
+82          * 1. Check if a different partition is found. If yes, initialize bin flag to 1 (first bin of the partition) and
+83          *    save the current RESVAL, in order to compare it with all the elements of the current partition
+84          * 2. Compare one by one the elements of the partition with the its first element that was saved in 1.,
+85          *    in order to assess if they can be put in the same bin.
+86          *    This means that we check |new - first| < threshold. The threshold depends on the
+87          *    minimum and maximum values which were detected for the considered partition.
+88          * 3. If the comparison is below the threshold, add the element to the current bin. Otherwise create a new bin and
+88       ! put the
+89          *    current element in the new bin. Note that creating a new bin means also reset the first saved element with
+90          *    the current one, since it will be the smallest element of the current bin.
+91          * 4. If a new partition is found, then the procedure is reset (i.e. current bin is reset to 1 and the new first
+91       ! partition
+92          *    element is computed).
+93          */
+94         %let firstBinValue = .;
+95         %let currentBin = .;
+96         %let currentPartition = .;
+97         data myLib.&trn_table;
+98         
+99         	set myLib.&trn_table;
+100        
+101        	/* if the current row is inside a different partition */
+102        	if ( COUNTRY_YEARUNITFOODPARAM_FLAG ^= symgetn('currentPartition') ) then do;
+103        
+104        		/* Reset bin counter */
+105        		call symput('currentBin', 1);
+106        
+107        		/* Set the flag for the next element with the new bin */
+108        		BINFLAG = 1;
+109        		
+110        		/* Save the value of the first element of the new bin */
+111        		call symput('firstBinValue', RESVALWWMB);
+112        
+113        		/* Update the partition flag */
+114        		call symput('currentPartition', COUNTRY_YEARUNITFOODPARAM_FLAG);
+115        	end;
+116        	else do;
+117        
+118        		/*
+119        		 * Here we are inside the same partition and we need to check
+120        		 * if a new bin should be created or if the current record
+121        		 * should be put in the current bin
+122        		 */
+123        
+124        		/*
+125        		 * Compare the smallest element of the current bin
+126        		 * and the current record and check threshold. Since we are in the same partition
+127        		 * and the min and max information of the partition are contained in each row
+128        		 * we can directly access them using the current row
+129        		 */
+130        	    if abs(symgetn('firstBinValue') - RESVALWWMB) <= (MAXRESVAL - MINRESVAL)/&bin_tolerance then do;
+131        			BINFLAG = symgetn('currentBin');
+132        		end;
+133        	    else do;
+134        
+135        			/* Create another bin and set the flag
+136        		     * for the current row with the new bin
+137        		     */
+138        			BINFLAG = symgetn('currentBin') + 1;
+139        
+140        			/* save current bin */
+141        			call symput('currentBin', BINFLAG);
+142        
+143        			/* Save the value of the first element of the new bin */
+4                                                       The SAS System                            11:24 Monday, August 28, 2017
+
+144        			call symput('firstBinValue', RESVALWWMB);
+145        		end;
+146        	end;
+147        run;
+
+NOTE: Numeric values have been converted to character values at the places given by: (Line):(Column).
+      105:29   111:32   114:35   141:30   144:33   
+NOTE: Missing values were generated as a result of performing an operation on missing values.
+      Each place is given by: (Number of times) at (Line):(Column).
+      55766 at 130:9    55766 at 130:38   5294 at 130:66    5294 at 130:1     
+NOTE: There were 874382 observations read from the data set MYLIB.DWH_SUBSET.
+NOTE: The data set MYLIB.DWH_SUBSET has 874382 observations and 114 variables.
+NOTE: Compressing data set MYLIB.DWH_SUBSET decreased size by 93.90 percent. 
+      Compressed is 53350 pages; un-compressed would require 874382 pages.
+NOTE: DATA statement used (Total process time):
+      real time           2:03.97
+      cpu time            20.85 seconds
+      
+
+148        
+149        /* Remove temporary table */
+150        proc sql;
+151        	drop table myLib.RESVALRANGES;
+NOTE: Table MYLIB.RESVALRANGES has been dropped.
+152        run;
+NOTE: PROC SQL statements are executed immediately; The RUN statement has no effect.
+153        
+154        GOPTIONS NOACCESSIBLE;
+155        %LET _CLIENTTASKLABEL=;
+156        %LET _CLIENTPROJECTPATH=;
+157        %LET _CLIENTPROJECTNAME=;
+158        %LET _SASPROGRAMFILE=;
+159        
+160        ;*';*";*/;quit;
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.03 seconds
+      cpu time            0.00 seconds
+      
+160      !                run;
+
+161        ODS _ALL_ CLOSE;
+162        
+163        
+164        QUIT; RUN;
+165        

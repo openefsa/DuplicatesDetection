@@ -1,0 +1,361 @@
+1                                                       The SAS System                         14:08 Wednesday, August 30, 2017
+
+1          ;*';*";*/;quit;run;
+
+2          OPTIONS PAGENO=MIN;
+3          %LET _CLIENTTASKLABEL='Partition by ANALYSISY RESUNIT SAMPCOUNTRY PARAMCODE EFSAPRODCODE';
+4          %LET _CLIENTPROJECTPATH='C:\Users\avonva\Desktop\Pairs on DWH.egp';
+5          %LET _CLIENTPROJECTNAME='Pairs on DWH.egp';
+6          %LET _SASPROGRAMFILE=;
+7          
+8          ODS _ALL_ CLOSE;
+9          OPTIONS DEV=ACTIVEX;
+10         GOPTIONS XPIXELS=0 YPIXELS=0;
+11         FILENAME EGSR TEMP;
+12         ODS tagsets.sasreport13(ID=EGSR) FILE=EGSR STYLE=HtmlBlue
+12       ! STYLESHEET=(URL="file:///C:/Program%20Files/SASHome/x86/SASEnterpriseGuide/5.1/Styles/HtmlBlue.css") NOGTITLE
+12       ! NOGFOOTNOTE GPATH=&sasworklocation ENCODING=UTF8 options(rolap="on");
+NOTE: Writing TAGSETS.SASREPORT13(EGSR) Body file: EGSR
+13         
+14         GOPTIONS ACCESSIBLE;
+15         
+16         data myLib.COUNTRY_PARTITION(keep=ID SAMPCOUNTRY SAMPCOUNTRYCODE YEAR_UNIT_FOODEX_PARAM_FLAG MEMBEROFEU MEMBEROFEEA
+16       ! );
+17         	set &trn_table;
+18         	by SAMPCOUNTRY YEAR_UNIT_FOODEX_PARAM_FLAG;
+19         	if last.YEAR_UNIT_FOODEX_PARAM_FLAG;  /* delete duplicates (i.e. same sampcountry and partitionflag) */
+20         run;
+
+NOTE: There were 896292 observations read from the data set MYLIB.TRN_SET_2015.
+NOTE: The data set MYLIB.COUNTRY_PARTITION has 4952 observations and 6 variables.
+NOTE: Compressing data set MYLIB.COUNTRY_PARTITION decreased size by 81.32 percent. 
+      Compressed is 17 pages; un-compressed would require 91 pages.
+NOTE: DATA statement used (Total process time):
+      real time           59.27 seconds
+      cpu time            10.48 seconds
+      
+
+21         
+22          /* exclude eu, non eu... training records from the partition table */
+23         data myLib.COUNTRY_PARTITION;
+24         	set myLib.COUNTRY_PARTITION;
+25         	if SAMPCOUNTRYCODE in ('EU', 'XE', 'AA', 'XC', 'XX' ) then do;
+26         		delete;
+27         	end;
+28         run;
+
+NOTE: There were 4952 observations read from the data set MYLIB.COUNTRY_PARTITION.
+NOTE: The data set MYLIB.COUNTRY_PARTITION has 4934 observations and 6 variables.
+NOTE: Compressing data set MYLIB.COUNTRY_PARTITION decreased size by 81.11 percent. 
+      Compressed is 17 pages; un-compressed would require 90 pages.
+NOTE: DATA statement used (Total process time):
+      real time           0.07 seconds
+      cpu time            0.04 seconds
+      
+
+29         
+30         /* get the records of the eu, non eu, eea, non eea and unknown and put them in a separate table,
+31          * in order to create duplicates in an easy manner */
+32         proc sql;
+33         	create table myLib.COUNTRY_GROUPS as
+34         	select ID as GROUPID, SAMPCOUNTRY as COUNTRYGROUP, SAMPCOUNTRYCODE as GROUPCOUNTRYCODE,
+35         		YEAR_UNIT_FOODEX_PARAM_FLAG as GROUPPARTITIONFLAG
+36         	from &trn_table
+37         	where SAMPCOUNTRYCODE in ('EU', 'XE', 'AA', 'XC', 'XX' );
+NOTE: Compressing data set MYLIB.COUNTRY_GROUPS decreased size by 84.32 percent. 
+      Compressed is 29 pages; un-compressed would require 185 pages.
+NOTE: Table MYLIB.COUNTRY_GROUPS created, with 7935 rows and 4 columns.
+
+38         run;
+NOTE: PROC SQL statements are executed immediately; The RUN statement has no effect.
+2                                                       The SAS System                         14:08 Wednesday, August 30, 2017
+
+39         
+40         
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           1:04.14
+      cpu time            6.66 seconds
+      
+41         data _null_;
+
+42         	putlog 'NOTE: Putting EU, Non Eu, EEA, Non EEA, Unknown records into the related partitions';
+43         run;
+
+NOTE: Putting EU, Non Eu, EEA, Non EEA, Unknown records into the related partitions
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+44         
+45         /* Create duplicates of eu non eu... records to each country partition
+46          * where the PARTITIONFLAG is the same of the country group
+47          */
+48         data myLib.COUNTRY_PARTITION_DUPLICATES (rename=(GROUPID = ID) keep=GROUPID COUNTRYPARTITIONFLAG);
+49         
+50         	/* for each group */
+51         	set myLib.COUNTRY_GROUPS;
+52         
+53         	/* for the current row create duplicate based on its country properties */
+54         
+55         	/* for each record of COUNTRY_GROUPS
+56         	 * check all the records of COUNTRY_PARTITION
+57         	 * to check if there is need of duplicates for the current partition */
+58         	currentRow = 1;
+59         	do while (currentRow <= size);
+60         
+61         		/* point to the current row in the COUNTRY_PARTITION table */
+62         		set myLib.COUNTRY_PARTITION nobs=size point=currentRow;
+63         
+64         		/* if we found a record which can be contained in the
+65         		 * country partition of the current sampling country
+66         		 * then duplicate it and set a COUNTRYPARTITION flag
+67         		 * with the sampling country for the duplicate record
+68         		 * in order to be able to retrieve all the complete partitions afterwards
+69         		 */
+70         		if(
+71         			(MEMBEROFEU = 1 & GROUPCOUNTRYCODE = 'EU')  | /* if current partition is EU and current group is EU */
+72         			(MEMBEROFEU = . & GROUPCOUNTRYCODE = 'XE')  | /* if current partition is not EU and current group is not EU */
+73         			(MEMBEROFEEA = 1 & GROUPCOUNTRYCODE = 'AA') | /* if current partition is EEA and current group is EEA */
+74         			(MEMBEROFEEA = . & GROUPCOUNTRYCODE = 'XC') | /* if current partition is not EEA and current group is not EEA */
+75         			(GROUPCOUNTRYCODE = 'XX')                     /* if unknown country put it always */
+76         		)
+77         		then do;
+78         
+79         			/* if inside the same partition, then make duplicate
+80         			 * for example if we have france 101 and EU 101 we will
+81         			 * create the duplicate. Give the sampling country as flag */
+82         			if ( YEAR_UNIT_FOODEX_PARAM_FLAG = GROUPPARTITIONFLAG ) then do;
+83         				COUNTRYPARTITIONFLAG = SAMPCOUNTRY;
+84         				output;
+85         			end;
+86         		end;
+87         
+88         		/* go to next iteration */
+89         		currentRow = currentRow + 1;
+90         
+91         	end; /* end of while */
+92         run;
+
+NOTE: There were 7935 observations read from the data set MYLIB.COUNTRY_GROUPS.
+3                                                       The SAS System                         14:08 Wednesday, August 30, 2017
+
+NOTE: The data set MYLIB.COUNTRY_PARTITION_DUPLICATES has 2750 observations and 2 variables.
+NOTE: Compressing data set MYLIB.COUNTRY_PARTITION_DUPLICATES increased size by 41.67 percent. 
+      Compressed is 17 pages; un-compressed would require 12 pages.
+NOTE: DATA statement used (Total process time):
+      real time           30.91 seconds
+      cpu time            30.34 seconds
+      
+
+93         
+94         /* notify user with number of duplicates created */
+95         data _null_;
+96         	set myLib.COUNTRY_PARTITION_DUPLICATES nobs=newgrpsize;
+97         	set myLib.COUNTRY_GROUPS nobs=grpsize;
+98         	duplicatesSize = newgrpsize - grpsize;
+99         	putlog 'NOTE: Created ' duplicatesSize= 'duplicates for Eu, Non Eu, EEA, Non EEA and Unknown SAMPCOUNTRY.';
+100        	stop;
+101        run;
+
+NOTE: Created duplicatesSize=-5185 duplicates for Eu, Non Eu, EEA, Non EEA and Unknown SAMPCOUNTRY.
+NOTE: There were 1 observations read from the data set MYLIB.COUNTRY_PARTITION_DUPLICATES.
+NOTE: There were 1 observations read from the data set MYLIB.COUNTRY_GROUPS.
+NOTE: DATA statement used (Total process time):
+      real time           0.07 seconds
+      cpu time            0.01 seconds
+      
+
+102        
+103        /* order the duplicates by their ID */
+104        proc sort data=myLib.COUNTRY_PARTITION_DUPLICATES;
+105        	by ID;
+106        run;
+
+NOTE: There were 2750 observations read from the data set MYLIB.COUNTRY_PARTITION_DUPLICATES.
+NOTE: The data set MYLIB.COUNTRY_PARTITION_DUPLICATES has 2750 observations and 2 variables.
+NOTE: Compressing data set MYLIB.COUNTRY_PARTITION_DUPLICATES increased size by 41.67 percent. 
+      Compressed is 17 pages; un-compressed would require 12 pages.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           0.04 seconds
+      cpu time            0.01 seconds
+      
+
+107        
+108        /* order training set by ID */
+109        proc sort data=&trn_table;
+110        	by ID;
+111        run;
+
+NOTE: There were 896292 observations read from the data set MYLIB.TRN_SET_2015.
+NOTE: The data set MYLIB.TRN_SET_2015 has 896292 observations and 112 variables.
+NOTE: Compressing data set MYLIB.TRN_SET_2015 decreased size by 93.56 percent. 
+      Compressed is 57758 pages; un-compressed would require 896292 pages.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           1:53.88
+      cpu time            58.03 seconds
+      
+
+112        
+113        /* Add the training set information to the eu, non eu... records */
+114        data myLib.COUNTRY_PARTITION_DUPLICATES;
+115        	merge &trn_table myLib.COUNTRY_PARTITION_DUPLICATES(IN=country);
+116        	by ID;
+117        	if country then output;
+118        run;
+
+NOTE: There were 896292 observations read from the data set MYLIB.TRN_SET_2015.
+NOTE: There were 2750 observations read from the data set MYLIB.COUNTRY_PARTITION_DUPLICATES.
+NOTE: The data set MYLIB.COUNTRY_PARTITION_DUPLICATES has 2750 observations and 113 variables.
+NOTE: Compressing data set MYLIB.COUNTRY_PARTITION_DUPLICATES decreased size by 94.73 percent. 
+4                                                       The SAS System                         14:08 Wednesday, August 30, 2017
+
+      Compressed is 145 pages; un-compressed would require 2750 pages.
+NOTE: DATA statement used (Total process time):
+      real time           1:03.19
+      cpu time            13.55 seconds
+      
+
+119        
+120        /* remove eu non eu... records from the training set since we
+121         * will add the duplicates after */
+122        data &trn_table;
+123        	set &trn_table;
+124        	if ( SAMPCOUNTRYCODE in ('EU', 'XE', 'AA', 'XC', 'XX' ) ) then do;
+125        		delete;
+126        	end;
+127        run;
+
+NOTE: There were 896292 observations read from the data set MYLIB.TRN_SET_2015.
+NOTE: The data set MYLIB.TRN_SET_2015 has 888357 observations and 112 variables.
+NOTE: Compressing data set MYLIB.TRN_SET_2015 decreased size by 93.55 percent. 
+      Compressed is 57289 pages; un-compressed would require 888357 pages.
+NOTE: DATA statement used (Total process time):
+      real time           1:54.69
+      cpu time            30.71 seconds
+      
+
+128        
+129        /* add the eu, non eu... records to the training set
+130         * and set the COUNTRY_FLAG column */
+131        data &trn_table;
+132        
+133        	set &trn_table myLib.COUNTRY_PARTITION_DUPLICATES;
+134        
+135        	/* if the country partition flag is not defined (case when
+136             * a record did not match with eu, non eu... things)
+137             * set the samp country itself */
+138        	if ( COUNTRYPARTITIONFLAG = . ) then do;
+139        		COUNTRY_FLAG = SAMPCOUNTRY;
+140        	end;
+141        	else do;
+142        		COUNTRY_FLAG = COUNTRYPARTITIONFLAG;
+143        	end;
+144        
+145        	output;
+146        run;
+
+NOTE: There were 888357 observations read from the data set MYLIB.TRN_SET_2015.
+NOTE: There were 2750 observations read from the data set MYLIB.COUNTRY_PARTITION_DUPLICATES.
+NOTE: The data set MYLIB.TRN_SET_2015 has 891107 observations and 114 variables.
+NOTE: Compressing data set MYLIB.TRN_SET_2015 decreased size by 93.49 percent. 
+      Compressed is 58007 pages; un-compressed would require 891107 pages.
+NOTE: DATA statement used (Total process time):
+      real time           1:53.77
+      cpu time            30.31 seconds
+      
+
+147        
+148        
+149        /* Create a unique partition flag in the training set using
+150         * the country flag and the year unit food param flag */
+151        data &trn_table (drop=COUNTRYPARTITIONFLAG);
+152        	set &trn_table;
+153        	COUNTRY_YEARUNITFOODPARAM_FLAG = cats( YEAR_UNIT_FOODEX_PARAM_FLAG, COUNTRY_FLAG );
+154        run;
+
+NOTE: There were 891107 observations read from the data set MYLIB.TRN_SET_2015.
+NOTE: The data set MYLIB.TRN_SET_2015 has 891107 observations and 114 variables.
+NOTE: Compressing data set MYLIB.TRN_SET_2015 decreased size by 93.41 percent. 
+      Compressed is 58701 pages; un-compressed would require 891107 pages.
+5                                                       The SAS System                         14:08 Wednesday, August 30, 2017
+
+NOTE: DATA statement used (Total process time):
+      real time           1:56.04
+      cpu time            31.63 seconds
+      
+
+155        
+156        /* sort is required for the next step */
+157        proc sort data=&trn_table (rename=(COUNTRY_YEARUNITFOODPARAM_FLAG = P_FLAG));
+158        	by P_FLAG;
+159        run;
+
+NOTE: There were 891107 observations read from the data set MYLIB.TRN_SET_2015.
+NOTE: The data set MYLIB.TRN_SET_2015 has 891107 observations and 114 variables.
+NOTE: Compressing data set MYLIB.TRN_SET_2015 decreased size by 93.41 percent. 
+      Compressed is 58697 pages; un-compressed would require 891107 pages.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           1:57.85
+      cpu time            58.03 seconds
+      
+
+160        
+161        /* Set the partition flag as a number starting from 1 to n to make it easier to read */
+162        data &trn_table;* (drop=P_FLAG);
+163        	set &trn_table;
+164        	by P_FLAG;
+165        	retain COUNTRY_YEARUNITFOODPARAM_FLAG 0;
+166        	if first.P_FLAG then COUNTRY_YEARUNITFOODPARAM_FLAG = COUNTRY_YEARUNITFOODPARAM_FLAG+1;
+167        run;
+
+NOTE: There were 891107 observations read from the data set MYLIB.TRN_SET_2015.
+NOTE: The data set MYLIB.TRN_SET_2015 has 891107 observations and 115 variables.
+NOTE: Compressing data set MYLIB.TRN_SET_2015 decreased size by 93.38 percent. 
+      Compressed is 58960 pages; un-compressed would require 891107 pages.
+NOTE: DATA statement used (Total process time):
+      real time           1:54.61
+      cpu time            29.23 seconds
+      
+
+168        
+169        data _null_;
+170        	putlog 'NOTE: PartitionCreator is finished!';
+171        run;
+
+NOTE: PartitionCreator is finished!
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+172        
+173        /* Delete useless variables */
+174        proc sql;
+175        	drop table myLib.COUNTRY_PARTITION, myLib.COUNTRY_GROUPS, myLib.COUNTRY_PARTITION_DUPLICATES;
+NOTE: Table MYLIB.COUNTRY_PARTITION has been dropped.
+NOTE: Table MYLIB.COUNTRY_GROUPS has been dropped.
+NOTE: Table MYLIB.COUNTRY_PARTITION_DUPLICATES has been dropped.
+176        run;
+NOTE: PROC SQL statements are executed immediately; The RUN statement has no effect.
+177        
+178        GOPTIONS NOACCESSIBLE;
+179        %LET _CLIENTTASKLABEL=;
+180        %LET _CLIENTPROJECTPATH=;
+181        %LET _CLIENTPROJECTNAME=;
+182        %LET _SASPROGRAMFILE=;
+183        
+184        ;*';*";*/;quit;
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.06 seconds
+6                                                       The SAS System                         14:08 Wednesday, August 30, 2017
+
+      cpu time            0.01 seconds
+      
+184      !                run;
+
+185        ODS _ALL_ CLOSE;
+186        
+187        
+188        QUIT; RUN;
+189        

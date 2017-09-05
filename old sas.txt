@@ -1,0 +1,567 @@
+/* Create a table with all the year, unit combinations */
+proc sql;
+	create table myLib.YEAR_UNIT_COMBINATIONS as
+	select distinct SAMPY, ANALYSISY, RESUNIT
+	from myLib.TRAINING_SET;
+quit;
+
+/* Add an identifier to each combination using the row id */
+data myLib.YEAR_UNIT_COMBINATIONS_1;
+  set myLib.YEAR_UNIT_COMBINATIONS;
+  ID=_n_;
+run;
+
+/* Add the partition id to the training set */
+proc sql;
+	select ts.*, comb.ID
+	from myLib.TRAINING_SET as ts
+	inner join myLib.YEAR_UNIT_COMBINATIONS_1 as comb
+	on ts.SAMPY = comb.SAMPY and ts.ANALYSISY = comb.ANALYSISY and ts.RESUNIT = comb.RESUNIT;
+quit;
+
+
+
+
+
+
+
+
+/* Sampling country partition */
+/* Assign EU and EEA flags to each country */
+data myLib.SUBSET_TRAINING_SET;
+	set myLib.SUBSET_TRAINING_SET;
+	If SAMPCOUNTRY in (13,21,23,96,53,54,57,62,69,74,55,87,98,100,107,131,129,130
+						,148,161,174,179,184,197,195,66,192,76) Then EU = 1;  /* EU countries */
+	Else EU = 0; /* Non EU countries */
+
+	If SAMPCOUNTRY in (13,21,23,96,53,54,57,62,69,74,55,87,98,106,100,107,131,
+						125,129,130,148,161,162,174,179,184,197,195,66,192,76) Then EEA = 1; /* EEA countries */
+	Else EEA = 0; /* Non EEA countries */
+run;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/* Compute the next bin and the row where the next bin start for each record */
+data myLib.NEXT_BIN (keep=PARTITIONFLAG BINFLAG NEXTBIN NEXTBINSTART RESVALWWMB MINRESVAL MAXRESVAL );
+
+	/* 
+	 * get the value and the partition of the first element,
+	 * which is, the smallest element of the first bin
+	 */
+	firstElem = 1;
+
+	set myLib.PARTITION_BIN_FLAGS point=firstElem;
+	CURRENTPARTITION = PARTITIONFLAG;
+	CURRENTBIN = -1;
+
+	/* for each row of training set */
+	currentRow = 1;
+	do while( currentRow <= nobs );
+		set myLib.PARTITION_BIN_FLAGS nobs=nobs;
+
+		/* get the current row of the dataset */
+		set myLib.PARTITION_BIN_FLAGS point=currentRow;
+
+
+
+		/* if different partition reset variables
+		 * and recompute next bin */
+		if ( CURRENTPARTITION ^= PARTITIONFLAG ) then do;
+
+			CURRENTPARTITION = PARTITIONFLAG;
+			CURRENTBIN = -1;
+			NEXTBIN = .;
+			NEXTBINSTART = .;
+			PARTITIONCHANGED = CURRENTPARTITION;
+		end;
+		else PARTITIONCHANGED = .;
+
+
+
+		/* if we have a new bin search next bin */
+		if ( CURRENTBIN ^= BINFLAG ) then do;
+			BINCHANGED = BINFLAG;
+		end; 
+		else BINCHANGED = .;
+
+
+
+
+		/* if we have a new bin search next bin */
+		if ( CURRENTBIN ^= BINFLAG ) then do;
+
+			CURRENTBIN = BINFLAG;
+			
+			/* search next bin */
+			NEXTBIN = .;
+			NEXTBINSTART = .;
+
+			binRow = currentRow;
+			do while( binRow <= nobs );
+
+				/* set current row, rename variables to avoid conflicts */
+				set myLib.PARTITION_BIN_FLAGS(rename= (
+					PARTITIONFLAG = NEXTPARTFLAG 
+					BINFLAG = NEXTBINFLAG 
+					RESVALWWMB = VALUE 
+					MINRESVAL = NEXTMINRESVAL
+					MAXRESVAL = NEXTMAXRESVAL)) point=binRow;
+
+				/* if we arrived into another partition stop, 
+				 * we do not mix bins of different partitions */
+				if ( CURRENTPARTITION ^= NEXTPARTFLAG ) then do;
+					leave;
+				end;
+
+
+				/* if next bin is found inside same partition */
+				if ( CURRENTBIN ^= NEXTBINFLAG ) then do;
+
+					/* save row in which the bin start */
+					NEXTBINSTART = binRow;
+
+					/* save the bin flag */
+					NEXTBIN = NEXTBINFLAG;
+
+					/* work finished, exit loop */
+					leave;
+				end;
+
+				/* increment row number */
+				binRow = binRow + 1;
+			end; /* END DIFFERENT BIN WHILE */ 
+		end;
+
+
+
+		/* go on with the cycle and get next row */
+	    currentRow = currentRow + 1;
+		
+		output;
+  end;
+run;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+data myLib.NEXT_BIN;
+	set mylib.NEXT_BIN;
+
+	/* initialize flag value */
+	OVERLAPBINFLAG = cats("$", BINFLAG, "$");
+	OVERLAPCOUNT = 0;
+run;
+
+/* Check thresholds on intra-bins records (i.e. records belonging to different bins) */
+data myLib.NEXT_BIN_COPY;
+
+	set myLib.NEXT_BIN nobs=nobs;
+
+	/* evaluate all the rows of the next bin */
+	nextBinRow = NEXTBINSTART;
+	do while ( NEXTBIN ^= . & nextBinRow <= nobs);
+		
+		/* point to next bin row and rename columns, otherwise errors */
+		set myLib.NEXT_BIN(rename=( 
+			BINFLAG = NEXTBINFLAG 
+			NEXTBIN = NEXTNEXTBINFLAG
+			NEXTBINSTART = NEXTNEXTBINSTART
+			RESVALWWMB = NEXTRESVALWWMB 
+			PARTITIONFLAG = NEXTPARTITION
+			MINRESVAL = NEXTMINRESVAL
+			MAXRESVAL = NEXTMAXRESVAL
+			OVERLAPBINFLAG = NEXTOVERLAPBINFLAG
+			OVERLAPCOUNT = NEXTOVERLAPCOUNT
+			)) point=nextBinRow;
+
+		/* if other partition exit loop we do not compare bins of different partitions */
+		if ( PARTITIONFLAG ^= NEXTPARTITION ) then do;
+			leave;
+		end;
+
+		/* here we have the next bin, check if the threshold is ok */
+		if abs(NEXTRESVALWWMB - RESVALWWMB) <= (MAXRESVAL - MINRESVAL)/1000 then do;
+			/* if new bin not present add to the flag */
+			if not ( find(OVERLAPBINFLAG, cats("$", NEXTBINFLAG, "$") ) ge 1 ) then do;
+				OVERLAPBINFLAG = cats(OVERLAPBINFLAG, "$", NEXTBINFLAG, "$");
+				OVERLAPCOUNT = OVERLAPCOUNT + 1;
+			end;
+
+			/* add also the current bin to the next bin (the distance is the same) TODO */
+		end;
+		else do;
+			leave; /* exit bin loop if threshold is not satisfied (next elements are bigger that the current=> no check is needed */
+		end;
+
+		nextBinRow = nextBinRow + 1;
+	end; /* END NEXT BIN WHILE ITERATOR */
+run;
+
+
+
+
+
+
+
+/* non overlapping bins */
+data myLib.&trn_table;
+
+	/* initialize row and bin counters */
+	currentRow = 1;
+	currentBin = 1;
+
+	/* 
+	 * get the value and the partition of the first element,
+	 * which is, the smallest element of the first bin
+	 */
+	firstBinElem = 1;
+	set myLib.&trn_table point=firstBinElem nobs=nobs;
+	firstBinValue = RESVALWWMB;
+	currentPartition = COUNTRY_YEARUNITFOODPARAM_FLAG;
+
+	/* for each row of training set */
+	do while( currentRow <= nobs );
+
+		/* get the current row of the dataset */
+		set myLib.&trn_table point=currentRow;
+
+		/* if the current row is inside a different partition */
+		If ( COUNTRY_YEARUNITFOODPARAM_FLAG ^= currentPartition ) Then do;
+
+			/* Reset bin counter */ 
+			currentBin = 1;
+
+			/* Set the flag for the next element with the new bin */
+			BINFLAG = currentBin;
+
+			/* Save the value of the first element of the new bin */
+			firstBinValue = RESVALWWMB;
+
+			/* Update the partition flag */
+			currentPartition = COUNTRY_YEARUNITFOODPARAM_FLAG;
+
+			output;
+
+			/* go to the next iteration, no comparison should be done
+			   between different partitions */
+			continue;
+		End;
+		
+		/* 
+		 * Here we are inside the same partition and we need to check
+		 * if a new bin should be created or if the current record
+		 * should be put in the current bin 
+		 */
+      
+		/* 
+		 * Compare the smallest element of the current bin 
+		 * and the current record and check threshold. Since we are in the same partition
+		 * and the min and max information of the partition are contained in each row
+		 * we can directly access them using the current row
+		 */
+	    If abs(firstBinValue - RESVALWWMB) <= (MAXRESVAL - MINRESVAL)/&bin_tolerance Then do;
+			BINFLAG = currentBin;
+		end;
+	    Else do;
+
+			/* Create another bin */
+			currentBin = currentBin + 1;
+
+			/* Set the flag for the current row with the new bin */
+			BINFLAG = currentBin;
+
+			/* Save the value of the first element of the new bin */
+			firstBinValue = RESVALWWMB;
+		end;
+
+		/* go on with the cycle and get next row */
+	    currentRow = currentRow + 1;
+
+		/* output all the rows */
+		output;
+  end;
+
+  /* remove temporary variables */
+  drop currentRow firstBinValue currentBin currentPartition;
+run;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/* Compute the prev/next bin and the row where the next bin starts and the prev ends */
+data myLib.PARTITION_BIN_FLAGSPROVA (keep=ID CURRENTPARTITION COUNTRY_YEARUNITFOODPARAM_FLAG BINFLAG NEXTBIN PREVBIN PREVBINEND NEXTBINSTART RESVALWWMB MINRESVAL MAXRESVAL );
+
+	/* 
+	 * get the value and the partition of the first element,
+	 * which is, the smallest element of the first bin
+	 */
+	CURRENTPARTITION = COUNTRY_YEARUNITFOODPARAM_FLAG;
+	CURRENTBIN = -1;
+
+	/* for each row of training set */
+	currentRow = 1;
+	do while( currentRow <= nobs );
+		set myLib.PARTITION_BIN_FLAGS nobs=nobs;
+
+		/* get the current row of the dataset */
+		set myLib.PARTITION_BIN_FLAGS point=currentRow;
+
+		/* if different partition reset variables
+		 * and recompute next bin */
+		if ( CURRENTPARTITION ^= COUNTRY_YEARUNITFOODPARAM_FLAG ) then do;
+
+			CURRENTPARTITION = COUNTRY_YEARUNITFOODPARAM_FLAG;
+			CURRENTBIN = -1;
+			NEXTBIN = .;
+			NEXTBINSTART = .;
+			PARTITIONCHANGED = CURRENTPARTITION;
+		end;
+		else PARTITIONCHANGED = .;
+
+
+
+		/* if we have a new bin search next bin */
+		if ( CURRENTBIN ^= BINFLAG ) then do;
+			BINCHANGED = BINFLAG;
+		end; 
+		else BINCHANGED = .;
+
+
+		/* if we have a new bin search next bin */
+		if ( CURRENTBIN ^= BINFLAG ) then do;
+
+			CURRENTBIN = BINFLAG;
+			
+
+			/* Search previous bin */
+			PREVBIN = .;
+			PREVBINEND = .;
+
+			binRow = currentRow;
+			do while( binRow > 0 );
+
+				/* set current row, rename variables to avoid conflicts */
+				set myLib.PARTITION_BIN_FLAGS(rename= (
+					COUNTRY_YEARUNITFOODPARAM_FLAG = PREVPARTFLAG 
+					BINFLAG = PREVBINFLAG 
+					RESVALWWMB = PREVVALUE 
+					MINRESVAL = PREVMINRESVAL
+					MAXRESVAL = PREVMAXRESVAL)) point=binRow;
+
+				/* if we arrived into another partition stop, 
+				 * we do not mix bins of different partitions */
+				if ( CURRENTPARTITION ^= PREVPARTFLAG ) then do;
+					leave;
+				end;
+				
+				/* if prev bin is found inside same partition */
+				if ( CURRENTBIN ^= PREVBINFLAG ) then do;
+
+					/* save row in which the bin start */
+					PREVBINEND = binRow;
+					PREVBIN = PREVBINFLAG;
+
+					/* work finished, exit loop */
+					leave;
+				end;
+
+				/* decrement row number */
+				binRow = binRow - 1;
+			end; /* END DIFFERENT BIN WHILE */ 
+
+
+
+			/* search next bin */
+			NEXTBIN = .;
+			NEXTBINSTART = .;
+
+			binRow = currentRow;
+			do while( binRow <= nobs );
+
+				/* set current row, rename variables to avoid conflicts */
+				set myLib.PARTITION_BIN_FLAGS(rename= (
+					COUNTRY_YEARUNITFOODPARAM_FLAG = NEXTPARTFLAG 
+					BINFLAG = NEXTBINFLAG 
+					RESVALWWMB = NEXTVALUE 
+					MINRESVAL = NEXTMINRESVAL
+					MAXRESVAL = NEXTMAXRESVAL)) point=binRow;
+
+				/* if we arrived into another partition stop, 
+				 * we do not mix bins of different partitions */
+				if ( CURRENTPARTITION ^= NEXTPARTFLAG ) then do;
+					leave;
+				end;
+
+
+				/* if next bin is found inside same partition */
+				if ( CURRENTBIN ^= NEXTBINFLAG ) then do;
+
+					/* save row in which the bin start */
+					NEXTBINSTART = binRow;
+
+					/* save the bin flag */
+					NEXTBIN = NEXTBINFLAG;
+
+					/* work finished, exit loop */
+					leave;
+				end;
+
+				/* increment row number */
+				binRow = binRow + 1;
+			end; /* END DIFFERENT BIN WHILE */
+
+
+		end;
+
+
+
+		/* go on with the cycle and get next row */
+	    currentRow = currentRow + 1;
+		
+		output;
+  end;
+run;
+
+
+
+
+
+
+
+
+
+
+
+/* Sort country cat by id for merge statement */
+proc sort data=myLib.&country_cat;
+	by ID;
+run;
+
+/* Origin country merge */
+proc sort data=myLib.COUNTRY_CODES;
+	by ORIGCOUNTRY;
+run;
+data myLib.COUNTRY_CODES;
+	merge myLib.&country_cat(rename=(ID = ORIGCOUNTRY 
+							CODE = ORIGCOUNTRYCODE 
+							MEMBEROFEU = ORIGCOUNTRYEU 
+							MEMBEROFEEA = ORIGCOUNTRYEEA)) myLib.COUNTRY_CODES(IN=in);
+	by ORIGCOUNTRY;
+	if in then output;
+run;
+
+/* process country merge */
+proc sort data=myLib.COUNTRY_CODES;
+	by PROCCOUNTRY;
+run;
+data myLib.COUNTRY_CODES;
+	merge myLib.&country_cat(rename=(ID = PROCCOUNTRY 
+							CODE = PROCCOUNTRYCODE 
+							MEMBEROFEU = PROCCOUNTRYEU 
+							MEMBEROFEEA = PROCCOUNTRYEEA)) myLib.COUNTRY_CODES(IN=in);
+	by PROCCOUNTRY;
+	if in then output;
+run;
+
+
+/* lab country merge */
+proc sort data=myLib.COUNTRY_CODES;
+	by LABCOUNTRY;
+run;
+data myLib.COUNTRY_CODES;
+	merge myLib.&country_cat(rename=(ID = LABCOUNTRY 
+							CODE = LABCOUNTRYCODE 
+							MEMBEROFEU = LABCOUNTRYEU 
+							MEMBEROFEEA = LABCOUNTRYEEA)) myLib.COUNTRY_CODES(IN=in);
+	by LABCOUNTRY;
+	if in then output;
+run;
+
+/* local org country merge */
+proc sort data=myLib.COUNTRY_CODES;
+	by LOCALORGCOUNTRY;
+run;
+data myLib.COUNTRY_CODES;
+	merge myLib.&country_cat(rename=(ID = LOCALORGCOUNTRY 
+							CODE = LOCALORGCOUNTRYCODE 
+							MEMBEROFEU = LOCALORGCOUNTRYEU 
+							MEMBEROFEEA = LOCALORGCOUNTRYEEA)) myLib.COUNTRY_CODES(IN=in);
+	by LOCALORGCOUNTRY;
+	if in then output;
+run;
+
+
+

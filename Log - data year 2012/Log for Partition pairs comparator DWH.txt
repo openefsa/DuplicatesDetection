@@ -1,0 +1,1205 @@
+1                                                       The SAS System                          09:45 Thursday, August 31, 2017
+
+1          ;*';*";*/;quit;run;
+2          OPTIONS PAGENO=MIN;
+3          %LET _CLIENTTASKLABEL='Partition pairs comparator';
+4          %LET _CLIENTPROJECTPATH='C:\Users\avonva\Desktop\Pairs on DWH.egp';
+5          %LET _CLIENTPROJECTNAME='Pairs on DWH.egp';
+6          %LET _SASPROGRAMFILE=;
+7          
+8          ODS _ALL_ CLOSE;
+9          OPTIONS DEV=ACTIVEX;
+10         GOPTIONS XPIXELS=0 YPIXELS=0;
+11         FILENAME EGSR TEMP;
+12         ODS tagsets.sasreport13(ID=EGSR) FILE=EGSR STYLE=HtmlBlue
+12       ! STYLESHEET=(URL="file:///C:/Program%20Files/SASHome/x86/SASEnterpriseGuide/5.1/Styles/HtmlBlue.css") NOGTITLE
+12       ! NOGFOOTNOTE GPATH=&sasworklocation ENCODING=UTF8 options(rolap="on");
+NOTE: Writing TAGSETS.SASREPORT13(EGSR) Body file: EGSR
+13         
+14         GOPTIONS ACCESSIBLE;
+15         
+16         /*
+17          * @author Avon Valentino, Crt Sustar - August 2017
+18          *
+19          * This program is used to compare among them the
+20          * records contained in each data partition created in
+21          * the previous steps. Several distances between the
+22          * records fields are computed.
+23          */
+24         
+25         
+26         data _null_;
+27         	putlog 'NOTE: Creating pairs and distances using PARTITION_ID. Only records with different TRX_ID and within the
+27       ! same partitions are compared!';
+28         run;
+
+NOTE: Creating pairs and distances using PARTITION_ID. Only records with different TRX_ID and within the same partitions are co
+mpared!
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+29         
+30         /* drop useless variables */
+31         data &trn_table;
+32         
+33         	set &trn_table(drop=RESUNIT
+34         		/*COUNTRY_FLAG
+35         		ANALYSISLEVEL1_ID
+36         		ID_L2*/
+37         		MINRESVAL
+38         		MAXRESVAL
+39         		DATACOLLECTION_DESC
+40         		ORGANISATION_DESC
+41         		EMAIL
+42         		TRANSMISSIONTIME
+43         		SEGMENT
+44         		TABLENAME
+45         		OLD_ID
+46         		DCF_STATUS
+47         		DWH_STATUS
+48         		PRODCODE /* ignore prod code, almost all not in list */
+49         		/*YEARUNITFLAG*/
+50         		YEAR_UNIT_FOODEX_PARAM_FLAG
+51         		COUNTRY_YEARUNITFOODPARAM_FLAG );
+52         run;
+
+NOTE: There were 1026391 observations read from the data set MYLIB.TRN_SET_2012.
+NOTE: The data set MYLIB.TRN_SET_2012 has 1026391 observations and 114 variables.
+NOTE: Compressing data set MYLIB.TRN_SET_2012 decreased size by 94.66 percent. 
+2                                                       The SAS System                          09:45 Thursday, August 31, 2017
+
+      Compressed is 54790 pages; un-compressed would require 1026391 pages.
+NOTE: DATA statement used (Total process time):
+      real time           2:09.43
+      cpu time            35.44 seconds
+      
+
+53         
+54         /* load farea catalogue and merge with training set to get origfisharea ids */
+55         data myLib.CV_FAREA;
+56         	set &flat_farea_cat;
+57         run;
+
+NOTE: There were 384 observations read from the data set CAT_DWH.CV_FAREA.
+NOTE: The data set MYLIB.CV_FAREA has 384 observations and 74 variables.
+NOTE: Compressing data set MYLIB.CV_FAREA decreased size by 98.96 percent. 
+      Compressed is 4 pages; un-compressed would require 384 pages.
+NOTE: DATA statement used (Total process time):
+      real time           0.29 seconds
+      cpu time            0.12 seconds
+      
+
+58         
+59         proc sort data=myLib.CV_FAREA(keep=ID CODE rename=(ID=ORIGFISHAREAID));
+60         	by CODE;
+61         run;
+
+NOTE: There were 384 observations read from the data set MYLIB.CV_FAREA.
+NOTE: The data set MYLIB.CV_FAREA has 384 observations and 2 variables.
+NOTE: Compressing data set MYLIB.CV_FAREA increased size by 100.00 percent. 
+      Compressed is 2 pages; un-compressed would require 1 pages.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           0.10 seconds
+      cpu time            0.03 seconds
+      
+
+62         
+63         /* sort data in order to execute the next step */
+64         proc sort data=&trn_table;
+65         	by ORIGFISHAREACODE;
+66         run;
+
+NOTE: There were 1026391 observations read from the data set MYLIB.TRN_SET_2012.
+NOTE: The data set MYLIB.TRN_SET_2012 has 1026391 observations and 114 variables.
+NOTE: Compressing data set MYLIB.TRN_SET_2012 decreased size by 94.66 percent. 
+      Compressed is 54789 pages; un-compressed would require 1026391 pages.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           1:48.35
+      cpu time            1:00.87
+      
+
+67         
+68         data &trn_table;
+69         	merge &trn_table(IN=in) myLib.CV_FAREA(rename=(CODE=ORIGFISHAREACODE));
+70         	by ORIGFISHAREACODE;
+71         	if(in) then output;
+72         run;
+
+NOTE: There were 1026391 observations read from the data set MYLIB.TRN_SET_2012.
+NOTE: There were 384 observations read from the data set MYLIB.CV_FAREA.
+NOTE: The data set MYLIB.TRN_SET_2012 has 1026391 observations and 115 variables.
+NOTE: Compressing data set MYLIB.TRN_SET_2012 decreased size by 94.63 percent. 
+      Compressed is 55067 pages; un-compressed would require 1026391 pages.
+NOTE: DATA statement used (Total process time):
+      real time           1:46.25
+      cpu time            30.28 seconds
+      
+
+73         
+3                                                       The SAS System                          09:45 Thursday, August 31, 2017
+
+74         data _null_;
+75         	putlog 'USER: Adding hierarchies levels...';
+76         run;
+
+USER: Adding hierarchies levels...
+NOTE: DATA statement used (Total process time):
+      real time           0.00 seconds
+      cpu time            0.00 seconds
+      
+
+77         
+78         /* Add all the hierarchies levels which are needed to compute hierarchies distances */
+79         %addHierarchyLevels(&flat_nuts_cat, &trn_table, ID, SAMPAREA, _L, _ID, 1, 5);
+
+NOTE: There were 39507 observations read from the data set CAT_DWH.CV_NUTS.
+NOTE: The data set MYLIB.TEMP_TABLE has 39507 observations and 6 variables.
+NOTE: Compressing data set MYLIB.TEMP_TABLE decreased size by 5.10 percent. 
+      Compressed is 447 pages; un-compressed would require 471 pages.
+NOTE: DATA statement used (Total process time):
+      real time           2.51 seconds
+      cpu time            2.24 seconds
+      
+
+
+NOTE: There were 39507 observations read from the data set MYLIB.TEMP_TABLE.
+NOTE: The data set MYLIB.TEMP_TABLE has 39507 observations and 6 variables.
+NOTE: Compressing data set MYLIB.TEMP_TABLE decreased size by 5.10 percent. 
+      Compressed is 447 pages; un-compressed would require 471 pages.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           0.43 seconds
+      cpu time            0.04 seconds
+      
+
+
+NOTE: There were 1026391 observations read from the data set MYLIB.TRN_SET_2012.
+NOTE: The data set MYLIB.TRN_SET_2012 has 1026391 observations and 115 variables.
+NOTE: Compressing data set MYLIB.TRN_SET_2012 decreased size by 94.63 percent. 
+      Compressed is 55092 pages; un-compressed would require 1026391 pages.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           1:48.62
+      cpu time            58.98 seconds
+      
+
+
+NOTE: There were 39507 observations read from the data set MYLIB.TEMP_TABLE.
+NOTE: There were 1026391 observations read from the data set MYLIB.TRN_SET_2012.
+NOTE: The data set MYLIB.TRN_SET_2012 has 1026391 observations and 120 variables.
+NOTE: Compressing data set MYLIB.TRN_SET_2012 decreased size by 94.48 percent. 
+      Compressed is 56612 pages; un-compressed would require 1026391 pages.
+NOTE: DATA statement used (Total process time):
+      real time           1:52.11
+      cpu time            30.87 seconds
+      
+
+80         %addHierarchyLevels(&flat_nuts_cat, &trn_table, ID, ORIGAREA, _L, _ID, 1, 5);
+
+NOTE: Deleting MYLIB.TEMP_TABLE (memtype=DATA).
+NOTE: PROCEDURE DELETE used (Total process time):
+      real time           0.03 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 39507 observations read from the data set CAT_DWH.CV_NUTS.
+NOTE: The data set MYLIB.TEMP_TABLE has 39507 observations and 6 variables.
+NOTE: Compressing data set MYLIB.TEMP_TABLE decreased size by 5.10 percent. 
+      Compressed is 447 pages; un-compressed would require 471 pages.
+NOTE: DATA statement used (Total process time):
+4                                                       The SAS System                          09:45 Thursday, August 31, 2017
+
+      real time           3.77 seconds
+      cpu time            2.40 seconds
+      
+
+
+NOTE: There were 39507 observations read from the data set MYLIB.TEMP_TABLE.
+NOTE: The data set MYLIB.TEMP_TABLE has 39507 observations and 6 variables.
+NOTE: Compressing data set MYLIB.TEMP_TABLE decreased size by 5.10 percent. 
+      Compressed is 447 pages; un-compressed would require 471 pages.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           1.73 seconds
+      cpu time            0.17 seconds
+      
+
+
+NOTE: There were 1026391 observations read from the data set MYLIB.TRN_SET_2012.
+NOTE: The data set MYLIB.TRN_SET_2012 has 1026391 observations and 120 variables.
+NOTE: Compressing data set MYLIB.TRN_SET_2012 decreased size by 94.48 percent. 
+      Compressed is 56618 pages; un-compressed would require 1026391 pages.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           2:01.14
+      cpu time            1:00.55
+      
+
+
+NOTE: There were 39507 observations read from the data set MYLIB.TEMP_TABLE.
+NOTE: There were 1026391 observations read from the data set MYLIB.TRN_SET_2012.
+NOTE: The data set MYLIB.TRN_SET_2012 has 1026391 observations and 125 variables.
+NOTE: Compressing data set MYLIB.TRN_SET_2012 decreased size by 94.34 percent. 
+      Compressed is 58130 pages; un-compressed would require 1026391 pages.
+NOTE: DATA statement used (Total process time):
+      real time           2:09.12
+      cpu time            37.23 seconds
+      
+
+81         %addHierarchyLevels(&flat_nuts_cat, &trn_table, ID, PROCAREA, _L, _ID, 1, 5);
+
+NOTE: Deleting MYLIB.TEMP_TABLE (memtype=DATA).
+NOTE: PROCEDURE DELETE used (Total process time):
+      real time           0.03 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 39507 observations read from the data set CAT_DWH.CV_NUTS.
+NOTE: The data set MYLIB.TEMP_TABLE has 39507 observations and 6 variables.
+NOTE: Compressing data set MYLIB.TEMP_TABLE decreased size by 5.10 percent. 
+      Compressed is 447 pages; un-compressed would require 471 pages.
+NOTE: DATA statement used (Total process time):
+      real time           2.58 seconds
+      cpu time            2.23 seconds
+      
+
+
+NOTE: There were 39507 observations read from the data set MYLIB.TEMP_TABLE.
+NOTE: The data set MYLIB.TEMP_TABLE has 39507 observations and 6 variables.
+NOTE: Compressing data set MYLIB.TEMP_TABLE decreased size by 5.10 percent. 
+      Compressed is 447 pages; un-compressed would require 471 pages.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           0.60 seconds
+      cpu time            0.07 seconds
+      
+
+
+NOTE: There were 1026391 observations read from the data set MYLIB.TRN_SET_2012.
+NOTE: The data set MYLIB.TRN_SET_2012 has 1026391 observations and 125 variables.
+NOTE: Compressing data set MYLIB.TRN_SET_2012 decreased size by 94.34 percent. 
+      Compressed is 58129 pages; un-compressed would require 1026391 pages.
+5                                                       The SAS System                          09:45 Thursday, August 31, 2017
+
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           1:59.98
+      cpu time            1:02.58
+      
+
+
+NOTE: There were 39507 observations read from the data set MYLIB.TEMP_TABLE.
+NOTE: There were 1026391 observations read from the data set MYLIB.TRN_SET_2012.
+NOTE: The data set MYLIB.TRN_SET_2012 has 1026391 observations and 130 variables.
+NOTE: Compressing data set MYLIB.TRN_SET_2012 decreased size by 94.21 percent. 
+      Compressed is 59393 pages; un-compressed would require 1026393 pages.
+NOTE: DATA statement used (Total process time):
+      real time           1:56.95
+      cpu time            32.66 seconds
+      
+
+82         %addHierarchyLevels(&flat_farea_cat, &trn_table, ID, ORIGFISHAREAID, _L, _ID, 1, 6);
+
+NOTE: Deleting MYLIB.TEMP_TABLE (memtype=DATA).
+NOTE: PROCEDURE DELETE used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 384 observations read from the data set CAT_DWH.CV_FAREA.
+NOTE: The data set MYLIB.TEMP_TABLE has 384 observations and 7 variables.
+NOTE: Compressing data set MYLIB.TEMP_TABLE decreased size by 0.00 percent. 
+      Compressed is 6 pages; un-compressed would require 6 pages.
+NOTE: DATA statement used (Total process time):
+      real time           0.09 seconds
+      cpu time            0.04 seconds
+      
+
+
+NOTE: There were 384 observations read from the data set MYLIB.TEMP_TABLE.
+NOTE: The data set MYLIB.TEMP_TABLE has 384 observations and 7 variables.
+NOTE: Compressing data set MYLIB.TEMP_TABLE decreased size by 0.00 percent. 
+      Compressed is 6 pages; un-compressed would require 6 pages.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           0.04 seconds
+      cpu time            0.01 seconds
+      
+
+
+NOTE: There were 1026391 observations read from the data set MYLIB.TRN_SET_2012.
+NOTE: The data set MYLIB.TRN_SET_2012 has 1026391 observations and 130 variables.
+NOTE: Compressing data set MYLIB.TRN_SET_2012 decreased size by 94.21 percent. 
+      Compressed is 59387 pages; un-compressed would require 1026393 pages.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           1:56.45
+      cpu time            1:00.79
+      
+
+
+NOTE: There were 384 observations read from the data set MYLIB.TEMP_TABLE.
+NOTE: There were 1026391 observations read from the data set MYLIB.TRN_SET_2012.
+NOTE: The data set MYLIB.TRN_SET_2012 has 1026391 observations and 136 variables.
+NOTE: Compressing data set MYLIB.TRN_SET_2012 decreased size by 94.05 percent. 
+      Compressed is 61080 pages; un-compressed would require 1026393 pages.
+NOTE: DATA statement used (Total process time):
+      real time           1:54.30
+      cpu time            32.91 seconds
+      
+
+83         %addHierarchyLevels(&flat_param_cat, &trn_table, ID, PARAMCODE, _L, _ID, 1, 7);
+
+NOTE: Deleting MYLIB.TEMP_TABLE (memtype=DATA).
+6                                                       The SAS System                          09:45 Thursday, August 31, 2017
+
+NOTE: PROCEDURE DELETE used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 2862 observations read from the data set CAT_DWH.CV_PARAM_CHEMOCCREP.
+NOTE: The data set MYLIB.TEMP_TABLE has 2862 observations and 8 variables.
+NOTE: Compressing data set MYLIB.TEMP_TABLE decreased size by 10.87 percent. 
+      Compressed is 41 pages; un-compressed would require 46 pages.
+NOTE: DATA statement used (Total process time):
+      real time           0.56 seconds
+      cpu time            0.46 seconds
+      
+
+
+NOTE: There were 2862 observations read from the data set MYLIB.TEMP_TABLE.
+NOTE: The data set MYLIB.TEMP_TABLE has 2862 observations and 8 variables.
+NOTE: Compressing data set MYLIB.TEMP_TABLE decreased size by 10.87 percent. 
+      Compressed is 41 pages; un-compressed would require 46 pages.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           0.14 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 1026391 observations read from the data set MYLIB.TRN_SET_2012.
+NOTE: The data set MYLIB.TRN_SET_2012 has 1026391 observations and 136 variables.
+NOTE: Compressing data set MYLIB.TRN_SET_2012 decreased size by 94.05 percent. 
+      Compressed is 61053 pages; un-compressed would require 1026393 pages.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           1:59.05
+      cpu time            1:00.13
+      
+
+
+NOTE: There were 2862 observations read from the data set MYLIB.TEMP_TABLE.
+NOTE: There were 1026391 observations read from the data set MYLIB.TRN_SET_2012.
+NOTE: The data set MYLIB.TRN_SET_2012 has 1026391 observations and 143 variables.
+NOTE: Compressing data set MYLIB.TRN_SET_2012 decreased size by 93.83 percent. 
+      Compressed is 63377 pages; un-compressed would require 1026392 pages.
+NOTE: DATA statement used (Total process time):
+      real time           2:10.99
+      cpu time            40.17 seconds
+      
+
+84         %addHierarchyLevels(&flat_prodtr_cat, &trn_table, ID, PRODTREAT, _L, _ID, 1, 3);
+
+NOTE: Deleting MYLIB.TEMP_TABLE (memtype=DATA).
+NOTE: PROCEDURE DELETE used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 62 observations read from the data set CAT_DWH.CV_PRODTR.
+NOTE: The data set MYLIB.TEMP_TABLE has 62 observations and 4 variables.
+NOTE: Compressing data set MYLIB.TEMP_TABLE increased size by 100.00 percent. 
+      Compressed is 2 pages; un-compressed would require 1 pages.
+NOTE: DATA statement used (Total process time):
+      real time           0.06 seconds
+      cpu time            0.04 seconds
+      
+
+
+NOTE: There were 62 observations read from the data set MYLIB.TEMP_TABLE.
+NOTE: The data set MYLIB.TEMP_TABLE has 62 observations and 4 variables.
+NOTE: Compressing data set MYLIB.TEMP_TABLE increased size by 100.00 percent. 
+7                                                       The SAS System                          09:45 Thursday, August 31, 2017
+
+      Compressed is 2 pages; un-compressed would require 1 pages.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           0.04 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 1026391 observations read from the data set MYLIB.TRN_SET_2012.
+NOTE: The data set MYLIB.TRN_SET_2012 has 1026391 observations and 143 variables.
+NOTE: Compressing data set MYLIB.TRN_SET_2012 decreased size by 93.82 percent. 
+      Compressed is 63383 pages; un-compressed would require 1026392 pages.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           2:03.89
+      cpu time            1:02.27
+      
+
+
+NOTE: There were 62 observations read from the data set MYLIB.TEMP_TABLE.
+NOTE: There were 1026391 observations read from the data set MYLIB.TRN_SET_2012.
+NOTE: The data set MYLIB.TRN_SET_2012 has 1026391 observations and 146 variables.
+NOTE: Compressing data set MYLIB.TRN_SET_2012 decreased size by 93.74 percent. 
+      Compressed is 64281 pages; un-compressed would require 1026392 pages.
+NOTE: DATA statement used (Total process time):
+      real time           2:15.08
+      cpu time            38.08 seconds
+      
+
+85         %addHierarchyLevels(&flat_prgtyp_cat, &trn_table, ID, PROGTYPE, _L, _ID, 1, 2);
+
+NOTE: Deleting MYLIB.TEMP_TABLE (memtype=DATA).
+NOTE: PROCEDURE DELETE used (Total process time):
+      real time           0.04 seconds
+      cpu time            0.01 seconds
+      
+
+
+NOTE: There were 24 observations read from the data set CAT_DWH.CV_PRGTYP.
+NOTE: The data set MYLIB.TEMP_TABLE has 24 observations and 3 variables.
+NOTE: Compressing data set MYLIB.TEMP_TABLE increased size by 100.00 percent. 
+      Compressed is 2 pages; un-compressed would require 1 pages.
+NOTE: DATA statement used (Total process time):
+      real time           0.06 seconds
+      cpu time            0.03 seconds
+      
+
+
+NOTE: There were 24 observations read from the data set MYLIB.TEMP_TABLE.
+NOTE: The data set MYLIB.TEMP_TABLE has 24 observations and 3 variables.
+NOTE: Compressing data set MYLIB.TEMP_TABLE increased size by 100.00 percent. 
+      Compressed is 2 pages; un-compressed would require 1 pages.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           0.04 seconds
+      cpu time            0.01 seconds
+      
+
+
+NOTE: There were 1026391 observations read from the data set MYLIB.TRN_SET_2012.
+NOTE: The data set MYLIB.TRN_SET_2012 has 1026391 observations and 146 variables.
+NOTE: Compressing data set MYLIB.TRN_SET_2012 decreased size by 93.74 percent. 
+      Compressed is 64292 pages; un-compressed would require 1026392 pages.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           2:07.98
+      cpu time            1:03.49
+      
+
+
+NOTE: There were 24 observations read from the data set MYLIB.TEMP_TABLE.
+NOTE: There were 1026391 observations read from the data set MYLIB.TRN_SET_2012.
+8                                                       The SAS System                          09:45 Thursday, August 31, 2017
+
+NOTE: The data set MYLIB.TRN_SET_2012 has 1026391 observations and 148 variables.
+NOTE: Compressing data set MYLIB.TRN_SET_2012 decreased size by 93.69 percent. 
+      Compressed is 64810 pages; un-compressed would require 1026392 pages.
+NOTE: DATA statement used (Total process time):
+      real time           2:18.41
+      cpu time            38.37 seconds
+      
+
+86         %addHierarchyLevels(&flat_sampmd_cat, &trn_table, ID, SAMPMETHOD, _L, _ID, 1, 1);
+
+NOTE: Deleting MYLIB.TEMP_TABLE (memtype=DATA).
+NOTE: PROCEDURE DELETE used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 23 observations read from the data set CAT_DWH.CV_SAMPMD.
+NOTE: The data set MYLIB.TEMP_TABLE has 23 observations and 2 variables.
+NOTE: Compressing data set MYLIB.TEMP_TABLE increased size by 100.00 percent. 
+      Compressed is 2 pages; un-compressed would require 1 pages.
+NOTE: DATA statement used (Total process time):
+      real time           0.04 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 23 observations read from the data set MYLIB.TEMP_TABLE.
+NOTE: The data set MYLIB.TEMP_TABLE has 23 observations and 2 variables.
+NOTE: Compressing data set MYLIB.TEMP_TABLE increased size by 100.00 percent. 
+      Compressed is 2 pages; un-compressed would require 1 pages.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           0.04 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 1026391 observations read from the data set MYLIB.TRN_SET_2012.
+NOTE: The data set MYLIB.TRN_SET_2012 has 1026391 observations and 148 variables.
+NOTE: Compressing data set MYLIB.TRN_SET_2012 decreased size by 93.69 percent. 
+      Compressed is 64796 pages; un-compressed would require 1026392 pages.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           2:11.21
+      cpu time            1:06.03
+      
+
+
+NOTE: There were 23 observations read from the data set MYLIB.TEMP_TABLE.
+NOTE: There were 1026391 observations read from the data set MYLIB.TRN_SET_2012.
+NOTE: The data set MYLIB.TRN_SET_2012 has 1026391 observations and 149 variables.
+NOTE: Compressing data set MYLIB.TRN_SET_2012 decreased size by 93.66 percent. 
+      Compressed is 65070 pages; un-compressed would require 1026392 pages.
+NOTE: DATA statement used (Total process time):
+      real time           2:17.84
+      cpu time            40.20 seconds
+      
+
+87         %addHierarchyLevels(&flat_sampnt_cat, &trn_table, ID, SAMPPOINT, _L, _ID, 1, 4);
+
+NOTE: Deleting MYLIB.TEMP_TABLE (memtype=DATA).
+NOTE: PROCEDURE DELETE used (Total process time):
+      real time           0.03 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 83 observations read from the data set CAT_DWH.CV_SAMPNT.
+NOTE: The data set MYLIB.TEMP_TABLE has 83 observations and 5 variables.
+9                                                       The SAS System                          09:45 Thursday, August 31, 2017
+
+NOTE: Compressing data set MYLIB.TEMP_TABLE increased size by 50.00 percent. 
+      Compressed is 3 pages; un-compressed would require 2 pages.
+NOTE: DATA statement used (Total process time):
+      real time           0.06 seconds
+      cpu time            0.01 seconds
+      
+
+
+NOTE: There were 83 observations read from the data set MYLIB.TEMP_TABLE.
+NOTE: The data set MYLIB.TEMP_TABLE has 83 observations and 5 variables.
+NOTE: Compressing data set MYLIB.TEMP_TABLE increased size by 50.00 percent. 
+      Compressed is 3 pages; un-compressed would require 2 pages.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           0.04 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 1026391 observations read from the data set MYLIB.TRN_SET_2012.
+NOTE: The data set MYLIB.TRN_SET_2012 has 1026391 observations and 149 variables.
+NOTE: Compressing data set MYLIB.TRN_SET_2012 decreased size by 93.66 percent. 
+      Compressed is 65079 pages; un-compressed would require 1026392 pages.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           1:59.59
+      cpu time            1:02.15
+      
+
+
+NOTE: There were 83 observations read from the data set MYLIB.TEMP_TABLE.
+NOTE: There were 1026391 observations read from the data set MYLIB.TRN_SET_2012.
+NOTE: The data set MYLIB.TRN_SET_2012 has 1026391 observations and 153 variables.
+NOTE: Compressing data set MYLIB.TRN_SET_2012 decreased size by 93.56 percent. 
+      Compressed is 66128 pages; un-compressed would require 1026392 pages.
+NOTE: DATA statement used (Total process time):
+      real time           1:57.35
+      cpu time            34.97 seconds
+      
+
+88         %addHierarchyLevels(&flat_anlymd_cat, &trn_table, ID, ANMETHCODE, _L, _ID, 1, 5);
+
+NOTE: Deleting MYLIB.TEMP_TABLE (memtype=DATA).
+NOTE: PROCEDURE DELETE used (Total process time):
+      real time           0.03 seconds
+      cpu time            0.01 seconds
+      
+
+
+NOTE: There were 356 observations read from the data set CAT_DWH.CV_ANLYMD.
+NOTE: The data set MYLIB.TEMP_TABLE has 356 observations and 6 variables.
+NOTE: Compressing data set MYLIB.TEMP_TABLE decreased size by 0.00 percent. 
+      Compressed is 5 pages; un-compressed would require 5 pages.
+NOTE: DATA statement used (Total process time):
+      real time           0.10 seconds
+      cpu time            0.06 seconds
+      
+
+
+NOTE: There were 356 observations read from the data set MYLIB.TEMP_TABLE.
+NOTE: The data set MYLIB.TEMP_TABLE has 356 observations and 6 variables.
+NOTE: Compressing data set MYLIB.TEMP_TABLE decreased size by 0.00 percent. 
+      Compressed is 5 pages; un-compressed would require 5 pages.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           0.40 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 1026391 observations read from the data set MYLIB.TRN_SET_2012.
+10                                                      The SAS System                          09:45 Thursday, August 31, 2017
+
+NOTE: The data set MYLIB.TRN_SET_2012 has 1026391 observations and 153 variables.
+NOTE: Compressing data set MYLIB.TRN_SET_2012 decreased size by 93.56 percent. 
+      Compressed is 66145 pages; un-compressed would require 1026392 pages.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           2:07.45
+      cpu time            1:08.96
+      
+
+
+NOTE: There were 356 observations read from the data set MYLIB.TEMP_TABLE.
+NOTE: There were 1026391 observations read from the data set MYLIB.TRN_SET_2012.
+NOTE: The data set MYLIB.TRN_SET_2012 has 1026391 observations and 158 variables.
+NOTE: Compressing data set MYLIB.TRN_SET_2012 decreased size by 93.42 percent. 
+      Compressed is 67526 pages; un-compressed would require 1026392 pages.
+NOTE: DATA statement used (Total process time):
+      real time           1:55.08
+      cpu time            34.00 seconds
+      
+
+89         
+90         /* Save all the variables names of the table, we use this
+91          * macro list to rename the variables automatically */
+92         %let vlist=;
+93         %let trn_table_name=%qscan(&trn_table,2,%str(.)); *remove myLib from the macro variable;
+94         %let datasetQuoted="&trn_table_name";
+95         
+
+NOTE: Deleting MYLIB.TEMP_TABLE (memtype=DATA).
+NOTE: PROCEDURE DELETE used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.00 seconds
+      
+96         proc sql noprint;
+
+97         	select name into :vlist separated by ' '
+98         	from dictionary.columns
+99         	where memname=upcase(&datasetQuoted);
+NOTE: Due to the PRESERVE_TAB_NAMES=NO libname option setting, 14 table(s) have not been displayed/returned.
+NOTE: Due to the PRESERVE_TAB_NAMES=NO libname option setting, 24 table(s) have not been displayed/returned.
+100        quit;
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           2.18 seconds
+      cpu time            0.06 seconds
+      
+
+101        
+102        
+103        /* Get variables to drop at the end of the pairs creation (all the variables but the distances and useful IDs) */
+104        proc sql noprint;
+105        	select name into :varToDrop1 separated by ' '
+106        	from dictionary.columns
+107        	where memname=upcase(&datasetQuoted) and name not in ('ID', 'DC_OCC_ID', 'DATACOLLECTION_CODE',
+108        			'ORGANISATION_CODE', 'ORGANISATION_FAKEID', 'PARTITION_ID', 'TRX_ID');
+NOTE: Due to the PRESERVE_TAB_NAMES=NO libname option setting, 14 table(s) have not been displayed/returned.
+NOTE: Due to the PRESERVE_TAB_NAMES=NO libname option setting, 24 table(s) have not been displayed/returned.
+109        quit;
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           1.77 seconds
+      cpu time            0.15 seconds
+      
+
+110        
+111        /* Add a suffix to a macro list space separated and return the results in the macro variable named varToDrop2.
+111      ! Example:
+112         * %let var = a b c; %addSuffixToMacro(var, 2) will return a2 b2 c2 in the macro variable */
+113        %macro addSuffixToMacro( variable /* macro list of variables names (separated by spaces) which should be renamed */,
+114        						suffix /* the suffix which will be applied to each variable */);
+115        
+11                                                      The SAS System                          09:45 Thursday, August 31, 2017
+
+116        		%global varToDrop2;
+117        		%local i next_name;
+118        		%let i=1;
+119        		%do %while (%scan(&variable, &i) ne );
+120        		   %let value = %scan(&variable, &i);
+121        		   %let varToDrop2 = &varToDrop2 &value.&suffix;
+122        		   %let i = %eval(&i + 1);
+123        		%end;
+124        %mend;
+125        
+126        /* drop also the variables of the other record which has a suffix of 2 in the variables names */
+127        %addSuffixToMacro(&varToDrop1, 2);
+128        %let varToDrop = &varToDrop1 &varToDrop2;
+129        
+130        
+131        
+132        /* Create a rename statement which can be used to
+133         * add a suffix to all the variables contained in the vlist
+134         * macro variable. In particular, this is useful when a
+135         * set statement with POINT is used with the same table,
+136         * in order to avoid name conflicts */
+137        %macro addSuffixToVariables( vlist /* macro list of variables names (separated by spaces) which should be renamed
+137      ! */,
+138        							suffix /* the suffix which will be applied to each variable */);
+139        	rename=(
+140        		%local i next_name;
+141        		%let i=1;
+142        		%do %while (%scan(&vlist, &i) ne );
+143        		   %let next_name = %scan(&vlist, &i);
+144        		   &next_name=&next_name.&suffix
+145        		   %let i = %eval(&i + 1);
+146        		%end;
+147        	)
+148        %mend;
+149        
+150        /* sort data in order to execute the next step efficiently and correctly */
+151        proc sort data=&trn_table;
+152        	by PARTITION_ID TRX_ID;
+153        run;
+
+NOTE: There were 1026391 observations read from the data set MYLIB.TRN_SET_2012.
+NOTE: The data set MYLIB.TRN_SET_2012 has 1026391 observations and 158 variables.
+NOTE: Compressing data set MYLIB.TRN_SET_2012 decreased size by 93.42 percent. 
+      Compressed is 67564 pages; un-compressed would require 1026392 pages.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           2:06.98
+      cpu time            1:06.81
+      
+
+154        
+155        
+156        /* Create the pairs. For each partition we create all the possible
+157         * pairs. The distances are also calculated there while creating pairs.
+158         * Note that it is useless to compare record 1 with record 2 and then
+159         * record 2 with record 1, since this will create a duplicate pair. The
+160         * algorithm uses an ordered dataset, in order to be able to create just
+161         * the necessary pairs. In particular, if we have 1,2,3,4,5 the algorithm
+162         * will compare: 1 with 2,3,4,5; 2 with 3,4,5; 3 with 4,5 and 4 with 5.
+163         *
+164         * Note that records with the same TRX_ID are not used to create pairs
+165         */
+166        data &pairs_table;
+167        	
+168        	set &trn_table nobs=size;
+169        
+170        	/* point to the next row (avoid self comparison) */
+171        	currentRow = _N_ + 1;
+172        
+12                                                      The SAS System                          09:45 Thursday, August 31, 2017
+
+173        	/* DEBUG just compute for 8040 partitions (about 150000 records)*/
+174        	/*if ( PARTITION_ID >= 8040 ) then do;
+175        		stop;
+176        	end;*/
+177        
+178        	/* Compare the current record with all the other records
+179        	 * contained in the same partition with a different TRX_ID
+180        	 */
+181        	do while( currentRow <= size );
+182        
+183        		/* point to the next record (the macro renames all the variables
+184        	     * of the other record with a "2" suffix) */
+185        		set &trn_table ( %addSuffixToVariables(&vlist, 2) ) point=currentRow;
+186        
+187        		/* do not compare rows if different partition id or equal transmission id */
+188        
+189        		/* different partition => stop go to next row of data step (we have sorted by partition id
+190        		 * therefore going on with the while loop is not useful, we will find always a different
+191        		 * partition id) */
+192        		if ( PARTITION_ID ^= PARTITION_ID2 ) then do;
+193        			leave;
+194        		end;
+195        
+196        		/* go to next line if equal trx id (avoid comparisons between same TRX_ID!) */
+197        		if ( TRX_ID = TRX_ID2 ) then do;
+198        			currentRow = currentRow + 1;
+199        			continue;
+200        		end;
+201        
+202        
+203        		array param_unks[3] _temporary_;
+204        		param_unks[1] = &paramUnk1;
+205        		param_unks[2] = &paramUnk2;
+206        		param_unks[3] = &paramUnk3;
+207        
+208        		%addHierarchyDist(PARAMCODE, _ID, _ID2, PARAMCODE_HIER_DIST, 1, 7, param_unks);
+WARNING: Function 'removeSpecialCharacters' was defined in a previous package. 'removeSpecialCharacters' in current package 
+         DISTANCES will be used as default when the package name is not specified.
+WARNING: Function 'removeAccents' was defined in a previous package. 'removeAccents' in current package DISTANCES will be used 
+         as default when the package name is not specified.
+209        
+210        		/* Remove records which test different foods or params. This is indeed
+211        		 * a partition extension. We could not test these things before since
+212        		 * we did not have the pairs */
+213        		if ( PARAMCODE_HIER_DIST = 1 ) then do;
+214        			currentRow = currentRow + 1;
+215        			continue;
+216        		end;
+217        
+218        
+219        		array foodex_unks[1] _temporary_;
+220        		foodex_unks[1] = -1;
+221        
+222        		/* Compute foodex and param distances */
+223        		%addHierarchyDist(ANALYSISLEVEL, _ID, _ID2, FOODEX_HIER_DIST, 1, 4, foodex_unks);
+224        
+225        		/* for efficiency we check first the foodex and just if the foodex is ok then compute param
+226        		   which has several levels */
+227        		if ( FOODEX_HIER_DIST = 1 ) then do;
+228        			currentRow = currentRow + 1;
+229        			continue;
+230        		end;
+231        
+232        
+233        		/* Here compute distances between records inside the same partition and
+234        		 * different transmission id (and same param/foodex) */
+235        
+236        		/* equal/not equal comparisons, unknown not allowed */
+13                                                      The SAS System                          09:45 Thursday, August 31, 2017
+
+237        		FILENAME_DIST = (FILENAME ^= FILENAME2);
+238        		LABSAMPLE_KEY_ID_DIST = (LABSAMPLE_KEY_ID ^= LABSAMPLE_KEY_ID2);
+239        		LABSUBSAMPCODE_DIST = (LABSUBSAMPCODE ^= LABSUBSAMPCODE2);
+240        		LANG_DIST = (LANG ^= LANG2);
+241        		PARAMTYPE_DIST = (PARAMTYPE ^= PARAMTYPE2);
+242        		RESVALUNCERT_DIST = (RESVALUNCERT ^= RESVALUNCERT2); /* just equal since it is a noisy field */
+243        		RESLEGALLIMIT_DIST = (RESLEGALLIMIT ^= RESLEGALLIMIT2); /* just equal since are standard values */
+244        		RESVAL_DIST = (RESVAL ^= RESVAL2); /* should be almost the same since we have created partitions based on that */
+245        		RESVALWWMB_DIST = (RESVALWWMB ^= RESVALWWMB2);
+246        
+247        
+248        		/* equal/not equal distances, unknown treated as neutral distance */
+249        
+250        		/* prod method */
+251        		array prod_meth_unk[3] _temporary_;
+252        		prod_meth_unk[1] = -1; /* default missing value for catalogues */
+253        		prod_meth_unk[2] = &UNK_prodmeth1;
+254        		prod_meth_unk[3] = &UNK_prodmeth2;
+255        		PRODMETH_DIST = numEqual(PRODPRODMETH, PRODPRODMETH2, prod_meth_unk);
+256        
+257        		/* prod package */
+258        		array prod_pack_unk[3] _temporary_;
+259        		prod_pack_unk[1] = -1; /* default missing value for catalogues */
+260        		prod_pack_unk[2] = &UNK_prodpack;
+261        		PRODPACK_DIST = numEqual(PRODPACK, PRODPACK2, prod_pack_unk);
+262        
+263        		/* sampling strategy */
+264        		array samp_strat_unk[3] _temporary_;
+265        		samp_strat_unk[1] = -1;
+266        		samp_strat_unk[2] = &UNK_sampstrat1;
+267        		samp_strat_unk[3] = &UNK_sampstrat2;
+268        		PROGSAMPSTRATEGY_DIST = numEqual(PROGSAMPSTRATEGY, PROGSAMPSTRATEGY2, samp_strat_unk);
+269        
+270        		/* 0 is the unknown for years months days... */
+271        		array date_unknowns[1] _temporary_;
+272        		date_unknowns[1] = 0;
+273        
+274        		PRODY_DIST = numEqual(PRODY, PRODY2, date_unknowns);
+275        		PRODM_DIST = numEqual(PRODM, PRODM2, date_unknowns);
+276        		PRODD_DIST = numEqual(PRODD, PRODD2, date_unknowns);
+277        
+278        		EXPIRY_DIST = numEqual(EXPIRY, EXPIRY2, date_unknowns);
+279        		EXPIRM_DIST = numEqual(EXPIRM, EXPIRM2, date_unknowns);
+280        		EXPIRD_DIST = numEqual(EXPIRD, EXPIRD2, date_unknowns);
+281        
+282        		SAMPY_DIST = numEqual(SAMPY, SAMPY2, date_unknowns);
+283        		SAMPM_DIST = numEqual(SAMPM, SAMPM2, date_unknowns);
+284        		SAMPD_DIST = numEqual(SAMPD, SAMPD2, date_unknowns);
+285        
+286        		ANALYSISY_DIST = numEqual(ANALYSISY, ANALYSISY2, date_unknowns);
+287        		ANALYSISM_DIST = numEqual(ANALYSISM, ANALYSISM2, date_unknowns);
+288        		ANALYSISD_DIST = numEqual(ANALYSISD, ANALYSISD2, date_unknowns);
+289        
+290        		/* sample number */
+291        		array samp_num_unk[2] _temporary_;
+292        		samp_num_unk[1] = .;
+293        		samp_num_unk[2] = 0;
+294        		SAMPLENUM_DIST = numEqual(SAMPLENUM, SAMPLENUM2, samp_num_unk);
+295        
+296        		/* lot size, combine both lotsize and lotsizeunit for the comparison */
+297        		array lot_size_unk[2] _temporary_;
+298        		lot_size_unk[1] = .;
+299        		lot_size_unk[2] = -1;
+300        		LOTSIZE_DIST = unitDistance(LOTSIZEUNIT, LOTSIZE, LOTSIZEUNIT2, LOTSIZE2, lot_size_unk);
+301        
+302        
+303        		/* lod and loq, these values are defined by some rules and should not vary due to humans mistake => equals is
+303      ! sufficient */
+14                                                      The SAS System                          09:45 Thursday, August 31, 2017
+
+304        		array res_lod_loq_unk[1] _temporary_;
+305        		res_lod_loq_unk[1] = .;
+306        		RESLOD_DIST = numEqual(RESLOD, RESLOD2, res_lod_loq_unk);
+307        		RESLOQ_DIST = numEqual(RESLOQ, RESLOQ2, res_lod_loq_unk);
+308        
+309        		/* expression of result */
+310        		array express_unk[1] _temporary_;
+311        		express_unk[1] = -1;
+312        		EXPRRES_DIST = numEqual(EXPRRES, EXPRRES2, express_unk);
+313        
+314        		/* Result qualitative value */
+315        		array resqual_value_unk[1] _temporary_;
+316        		resqual_value_unk[1] = -1;
+317        		RESQUALVALUE_DIST = numEqual(RESQUALVALUE, RESQUALVALUE2, resqual_value_unk);
+318        
+319        		/* type of result */
+320        		array restype_unk[1] _temporary_;
+321        		restype_unk[1] = -1;
+322        		RESTYPE_DIST = numEqual(RESTYPE, RESTYPE2, restype_unk);
+323        
+324        		/* type of legal limit */
+325        		array legallimit_type_unk[1] _temporary_;
+326        		legallimit_type_unk[1] = -1;
+327        		RESLEGALLIMITTYPE_DIST = numEqual(RESLEGALLIMITTYPE, RESLEGALLIMITTYPE2, legallimit_type_unk);
+328        
+329        
+330        		/* evaluation of the result */
+331        		array reseval_unk[2] _temporary_;
+332        		reseval_unk[1] = -1;
+333        		reseval_unk[2] = &UNK_res_evaluation;
+334        		RESEVALUATION_DIST = numEqual(RESEVALUATION, RESEVALUATION2, reseval_unk);
+335        
+336        
+337        		/* action taken */
+338        		array action_taken_unk[2] _temporary_;
+339        		action_taken_unk[1] = -1;
+340        		action_taken_unk[2] = &UNK_action;
+341        		ACTTAKENCODE_DIST = numEqual(ACTTAKENCODE, ACTTAKENCODE2, action_taken_unk);
+342        
+343        
+344        		/* type of legal limit */
+345        		array legallimit_unk[1] _temporary_;
+346        		legallimit_unk[1] = .;
+347        		RESLEGALLIMITTYPE_DIST = numEqual(RESLEGALLIMITTYPE, RESLEGALLIMITTYPE2, legallimit_unk);
+348        
+349        
+350        
+351        
+352        		/* Strings EQUAL distances */
+353        
+354        		/* Lab code, just check if equal or unknown (it is a code, string similarity does not make any sense)*/
+355        		array lab_code_unk[1] $ _temporary_;
+356        		lab_code_unk[1] = 'N_A';
+357        		LABCODE_DIST = strEqual(LABCODE, LABCODE2, lab_code_unk);
+358        
+359        
+360        
+361        
+362        		/* contains distances */
+363        
+364        		/* It could happen that one code is contained into the other,
+365        		 * we take into account this possibility */
+366        		array contained_unk[1] $ _temporary_;
+367        		contained_unk[1] = "";
+368        
+369        		LABSAMPCODE_DIST = isContainedDist(LABSAMPCODE, LABSAMPCODE2, contained_unk);
+370        		LABSAMPCODEFLAT_DIST = isContainedDist(LABSAMPCODEFLAT, LABSAMPCODEFLAT2, contained_unk);
+371        
+15                                                      The SAS System                          09:45 Thursday, August 31, 2017
+
+372        		RESULTCODE_DIST = isContainedDist(RESULTCODE, RESULTCODE2, contained_unk);
+373        		RESULTCODEFLAT_DIST = isContainedDist(RESULTCODEFLAT, RESULTCODEFLAT2, contained_unk);
+374        
+375        
+376        
+377        		/* compute country distances */
+378        
+379        		SAMPCOUNTRY_DIST = getCountryDist(SAMPCOUNTRYCODE, SAMPCOUNTRYCODE2, MEMBEROFEU, MEMBEROFEU2, MEMBEROFEEA,
+379      ! MEMBEROFEEA2);
+380        
+381        		ORIGCOUNTRY_DIST = getCountryDist(ORIGCOUNTRYCODE, ORIGCOUNTRYCODE2, ORIGCOUNTRYEU, ORIGCOUNTRYEU2,
+381      ! ORIGCOUNTRYEEA, ORIGCOUNTRYEEA2);
+382        
+383        		PROCCOUNTRY_DIST = getCountryDist(PROCCOUNTRYCODE, PROCCOUNTRYCODE2, PROCCOUNTRYEU, PROCCOUNTRYEU2,
+383      ! PROCCOUNTRYEEA, PROCCOUNTRYEEA2);
+384        
+385        		LABCOUNTRY_DIST = getCountryDist(LABCOUNTRYCODE, LABCOUNTRYCODE2, LABCOUNTRYEU, LABCOUNTRYEU2, LABCOUNTRYEEA,
+385      ! LABCOUNTRYEEA2);
+386        
+387        		LOCALORGCOUNTRY_DIST = getCountryDist(LOCALORGCOUNTRYCODE, LOCALORGCOUNTRYCODE2, LOCALORGCOUNTRYEU,
+388        									LOCALORGCOUNTRYEU2, LOCALORGCOUNTRYEEA, LOCALORGCOUNTRYEEA2);
+389        
+390        
+391        
+392        		/* prepare the unknown values for each catalogue */
+393        		array nuts_unks[5] _temporary_;
+394        		nuts_unks[1] = &nutsUnk1;
+395        		nuts_unks[2] = &nutsUnk2;
+396        		nuts_unks[3] = &nutsUnk3;
+397        		nuts_unks[4] = &nutsUnk4;
+398        		nuts_unks[5] = &nutsUnk5;
+399        
+400        		array farea_unks[1] _temporary_;
+401        		farea_unks[1] = &fareaUnk1;
+402        
+403        		array prodtr_unks[1] _temporary_;
+404        		prodtr_unks[1] = &prodtrUnk1;
+405        
+406        		array prgtyp_unks[2] _temporary_;
+407        		prgtyp_unks[1] = &prgtypUnk1;
+408        		prgtyp_unks[2] = &prgtypUnk2;
+409        
+410        		array sampmd_unks[2] _temporary_;
+411        		sampmd_unks[1] = &sampmdUnk1;
+412        		sampmd_unks[2] = &sampmdUnk2;
+413        
+414        		array sampnt_unks[4] _temporary_;
+415        		sampnt_unks[1] = &sampntUnk1;
+416        		sampnt_unks[2] = &sampntUnk2;
+417        		sampnt_unks[3] = &sampntUnk3;
+418        		sampnt_unks[4] = &sampntUnk4;
+419        		
+420        		array anlymd_unks[2] _temporary_;
+421        		anlymd_unks[1] = &anlymdUnk1;
+422        		anlymd_unks[2] = &anlymdUnk2;
+423        
+424        		%addHierarchyDist(SAMPAREA, _ID, _ID2, SAMPAREA_HIER_DIST, 1, 5, nuts_unks);
+425        		%addHierarchyDist(ORIGAREA, _ID, _ID2, ORIGAREA_HIER_DIST, 1, 5, nuts_unks);
+426        		%addHierarchyDist(ORIGFISHAREAID, _ID, _ID2, ORIGFISHAREA_HIER_DIST, 1, 6, farea_unks);
+427        		%addHierarchyDist(PROCAREA, _ID, _ID2, PROCAREA_HIER_DIST, 1, 5, nuts_unks);
+428        		%addProdTreatHierDist(PRODTREAT, _ID, _ID2, PRODTREAT_HIER_DIST, 1, 3, prodtr_unks);
+429        		%addHierarchyDist(PROGTYPE, _ID, _ID2, PROGTYPE_HIER_DIST, 1, 2, prgtyp_unks);
+430        		%addHierarchyDist(SAMPMETHOD, _ID, _ID2, SAMPMETHOD_HIER_DIST, 1, 1, sampmd_unks);
+431        		%addHierarchyDist(SAMPPOINT, _ID, _ID2, SAMPPOINT_HIER_DIST, 1, 4, sampnt_unks);
+432        		%addHierarchyDist(ANMETHCODE, _ID, _ID2, ANMETHCODE_HIER_DIST, 1, 5, anlymd_unks);
+433        
+434        		/* String distances */
+435        
+16                                                      The SAS System                          09:45 Thursday, August 31, 2017
+
+436        		array strings_unk[3] $ _temporary_;
+437        		strings_unk[1] = 'N_A';
+438        		strings_unk[2] = 'Unknown';
+439        		strings_unk[3] = '.';
+440        
+441        		/* decide thresholds based on maximum number of characters! */
+442        		*ORIGFISHAREATEXT_LEV_DIST = stringDist( ORIGFISHAREATEXT, ORIGFISHAREATEXT2, 5, strings_unk, 'complev', 0);
+443        		ORIGFISHAREATEXT_GED_DIST = stringDist( ORIGFISHAREATEXT, ORIGFISHAREATEXT2, 500, strings_unk, 'compged', 0);
+444        		*ORIGFISHAREATEXT_SPEDIS_DIST = stringDist( ORIGFISHAREATEXT, ORIGFISHAREATEXT2, 30, strings_unk, 'spedis', 0);
+445        
+446        		/* Code and text are indeed correlated. Therefore we check text differences
+447        		 * just if we have similar codes */
+448        		if ( ORIGFISHAREA_HIER_DIST <= 0.5 ) then do;
+449        			*ORIGFISHAREACOMB_LEV_DIST = ORIGFISHAREATEXT_LEV_DIST;
+450        			ORIGFISHAREACOMB_GED_DIST = ORIGFISHAREATEXT_GED_DIST;
+451        			*ORIGFISHAREACOMB_SPEDIS_DIST = ORIGFISHAREATEXT_SPEDIS_DIST;
+452        		end;
+453        		else do;
+454        			*ORIGFISHAREACOMB_LEV_DIST = 1;
+455        			ORIGFISHAREACOMB_GED_DIST = 1;
+456        			*ORIGFISHAREACOMB_SPEDIS_DIST = 1;
+457        		end;
+458        
+459        		*PRODTEXT_LEV_DIST = stringDist( PRODTEXT, PRODTEXT2, 5, strings_unk, 'complev', 0 );
+460        		PRODTEXT_GED_DIST = stringDist( PRODTEXT, PRODTEXT2, 150, strings_unk, 'compged', 0 );
+461        		*PRODTEXT_SPEDIS_DIST = stringDist( PRODTEXT, PRODTEXT2, 30, strings_unk, 'spedis', 0 );
+462        
+463        		*PRODBRANDNAME_LEV_DIST = stringDist( PRODBRANDNAME, PRODBRANDNAME2, 5, strings_unk, 'complev', 0 );
+464        		PRODBRANDNAME_GED_DIST = stringDist( PRODBRANDNAME, PRODBRANDNAME2, 500, strings_unk, 'compged', 0 );
+465        		*PRODBRANDNAME_SPEDIS_DIST = stringDist( PRODBRANDNAME, PRODBRANDNAME2, 30, strings_unk, 'spedis', 0 );
+466        
+467        		*PRODMANUF_LEV_DIST = stringDist( PRODMANUF, PRODMANUF2, 5, strings_unk, 'complev', 0 );
+468        		PRODMANUF_GED_DIST = stringDist( PRODMANUF, PRODMANUF2, 500, strings_unk, 'compged', 0 );
+469        		*PRODMANUF_SPEDIS_DIST = stringDist( PRODMANUF, PRODMANUF2, 30, strings_unk, 'spedis', 0 );
+470        
+471        		*PRODCOM_LEV_DIST = stringDist( PRODCOM, PRODCOM2, 5, strings_unk, 'complev', 0 );
+472        		PRODCOM_GED_DIST = stringDist( PRODCOM, PRODCOM2, 500, strings_unk, 'compged', 0 );
+473        		*PRODCOM_SPEDIS_DIST = stringDist( PRODCOM, PRODCOM2, 30, strings_unk, 'spedis', 0 );
+474        
+475        		*PROGCODE_LEV_DIST = stringDist( PROGCODE, PROGCODE2, 5, strings_unk, 'complev', 1 );
+476        		PROGCODE_GED_DIST = stringDist( PROGCODE, PROGCODE2, 500, strings_unk, 'compged', 1 );
+477        		*PROGCODE_SPEDIS_DIST = stringDist( PROGCODE, PROGCODE2, 30, strings_unk, 'spedis', 1 );
+478        
+479        		*PROGLEGALREF_LEV_DIST = stringDist( PROGLEGALREF, PROGLEGALREF2, 5, strings_unk, 'complev', 1 );
+480        		PROGLEGALREF_GED_DIST = stringDist( PROGLEGALREF, PROGLEGALREF2, 500, strings_unk, 'compged', 1 );
+481        		*PROGLEGALREF_SPEDIS_DIST = stringDist( PROGLEGALREF, PROGLEGALREF2, 30, strings_unk, 'spedis', 1 );
+482        
+483        		*LOCALORG_LEV_DIST = stringDist( LOCALORG, LOCALORG2, 5, strings_unk, 'complev', 0 );
+484        		LOCALORG_GED_DIST = stringDist( LOCALORG, LOCALORG2, 500, strings_unk, 'compged', 0 );
+485        		*LOCALORG_SPEDIS_DIST = stringDist( LOCALORG, LOCALORG2, 30, strings_unk, 'spedis', 0 );
+486        
+487        		*PARAMTEXT_LEV_DIST = stringDist( PARAMTEXT, PARAMTEXT2, 5, strings_unk, 'complev', 0 );
+488        		PARAMTEXT_GED_DIST = stringDist( PARAMTEXT, PARAMTEXT2, 500, strings_unk, 'compged', 0 );
+489        		*PARAMTEXT_SPEDIS_DIST = stringDist( PARAMTEXT, PARAMTEXT2, 30, strings_unk, 'spedis', 0 );
+490        
+491        		*ANMETHREFCODE_LEV_DIST = stringDist( ANMETHREFCODE, ANMETHREFCODE2, 5, strings_unk, 'complev', 1 );
+492        		ANMETHREFCODE_GED_DIST = stringDist( ANMETHREFCODE, ANMETHREFCODE2, 500, strings_unk, 'compged', 1 );
+493        		*ANMETHREFCODE_SPEDIS_DIST = stringDist( ANMETHREFCODE, ANMETHREFCODE2, 30, strings_unk, 'spedis', 1 );
+494        
+495        		*ANMETHTEXT_LEV_DIST = stringDist( ANMETHTEXT, ANMETHTEXT2, 5, strings_unk, 'complev', 0 );
+496        		ANMETHTEXT_GED_DIST = stringDist( ANMETHTEXT, ANMETHTEXT2, 500, strings_unk, 'compged', 0 );
+497        		*ANMETHTEXT_SPEDIS_DIST = stringDist( ANMETHTEXT, ANMETHTEXT2, 30, strings_unk, 'spedis', 0 );
+498        
+499        
+500        		/* Code and text are indeed correlated. Therefore we check text differences
+501        		 * just if we have similar codes */
+502        		if ( ANMETHCODE_HIER_DIST <= 0.5 ) then do;
+503        			*ANMETHCOMB_LEV_DIST = ANMETHTEXT_LEV_DIST;
+17                                                      The SAS System                          09:45 Thursday, August 31, 2017
+
+504        			ANMETHCOMB_GED_DIST = ANMETHTEXT_GED_DIST;
+505        			*ANMETHCOMB_SPEDIS_DIST = ANMETHTEXT_SPEDIS_DIST;
+506        		end;
+507        		else do;
+508        			*ANMETHCOMB_LEV_DIST = 1;
+509        			ANMETHCOMB_GED_DIST = 1;
+510        			*ANMETHCOMB_SPEDIS_DIST = 1;
+511        		end;
+512        
+513        
+514        		*RESCOMM_LEV_DIST = stringDist( RESCOMM, RESCOMM2, 5, strings_unk, 'complev', 0 );
+515        		RESCOMM_GED_DIST = stringDist( RESCOMM, RESCOMM2, 500, strings_unk, 'compged', 0 );
+516        		*RESCOMM_SPEDIS_DIST = stringDist( RESCOMM, RESCOMM2, 30, strings_unk, 'spedis', 0 );
+517        
+518        		PRODINGRED_GED_DIST = stringDist( PRODINGRED, PRODINGRED2, 500, strings_unk, 'compged', 0 );
+519        
+520        		/* numeric distances */
+521        
+522        		/* percentages has 0 as minimum and 100 as maximum */
+523        		FATPERC_DIST = euclidDistNormalized(FATPERC, FATPERC2, 0, 100);
+524        		MOISTPERC_DIST = euclidDistNormalized(MOISTPERC, MOISTPERC2, 0, 100);
+525        
+526        		/* output the created pair and go on with the cycle */
+527        		output;
+528        
+529        		currentRow = currentRow + 1;
+530        	end;
+531        
+532        	drop &varToDrop;
+533        run;
+
+NOTE: There were 1026391 observations read from the data set MYLIB.TRN_SET_2012.
+NOTE: The data set MYLIB.TRN_PAIRS_2012 has 3857637 observations and 86 variables.
+NOTE: Compressing data set MYLIB.TRN_PAIRS_2012 decreased size by 64.49 percent. 
+      Compressed is 85606 pages; un-compressed would require 241103 pages.
+NOTE: DATA statement used (Total process time):
+      real time           4:36:52.48
+      cpu time            4:32:14.69
+      
+
+534        /*
+535        data _null_;
+536        	set myLib.TRN_PAIRS nobs=nobs;
+537        	putlog 'NOTE: Distances training set created with ' nobs= 'pairs (i.e. records)';
+538        	stop;
+539        run;
+540        
+541        
+542        
+543        data myLib.TRN_PAIRS_COPY;
+544        	set myLib.TRN_PAIRS;
+545        run;*/
+546        
+547        
+548        /* Reorder pairs columns in order to have a nice view of duplicates */
+549        %macro reorderCols(variablesList);
+550        	%local i column;
+551        
+552        	%let i=1;
+553        	%let suffix=2;
+554        
+555        	retain
+556        	%do %while (%scan(&variablesList, &i) ne );
+557        		%let column = %scan(&variablesList, &i);
+558        		&column &column.&suffix
+559        		%let i = %eval(&i + 1);
+560        	%end;
+561        %mend;
+18                                                      The SAS System                          09:45 Thursday, August 31, 2017
+
+562        
+563        GOPTIONS NOACCESSIBLE;
+564        %LET _CLIENTTASKLABEL=;
+565        %LET _CLIENTPROJECTPATH=;
+566        %LET _CLIENTPROJECTNAME=;
+567        %LET _SASPROGRAMFILE=;
+568        
+569        ;*';*";*/;quit;run;
+570        ODS _ALL_ CLOSE;
+571        
+572        
+573        QUIT; RUN;
+574        

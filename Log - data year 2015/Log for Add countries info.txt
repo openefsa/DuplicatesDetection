@@ -1,0 +1,265 @@
+1                                                       The SAS System                         14:08 Wednesday, August 30, 2017
+
+1          ;*';*";*/;quit;run;
+2          OPTIONS PAGENO=MIN;
+3          %LET _CLIENTTASKLABEL='Add countries info';
+4          %LET _CLIENTPROJECTPATH='C:\Users\avonva\Desktop\Pairs on DWH.egp';
+5          %LET _CLIENTPROJECTNAME='Pairs on DWH.egp';
+6          %LET _SASPROGRAMFILE=;
+7          
+8          ODS _ALL_ CLOSE;
+9          OPTIONS DEV=ACTIVEX;
+10         GOPTIONS XPIXELS=0 YPIXELS=0;
+11         FILENAME EGSR TEMP;
+12         ODS tagsets.sasreport13(ID=EGSR) FILE=EGSR STYLE=HtmlBlue
+12       ! STYLESHEET=(URL="file:///C:/Program%20Files/SASHome/x86/SASEnterpriseGuide/5.1/Styles/HtmlBlue.css") NOGTITLE
+12       ! NOGFOOTNOTE GPATH=&sasworklocation ENCODING=UTF8 options(rolap="on");
+NOTE: Writing TAGSETS.SASREPORT13(EGSR) Body file: EGSR
+13         
+14         GOPTIONS ACCESSIBLE;
+15         
+16         /*
+17          * @author Avon Valentino, Crt Sustar - August 2017
+18          *
+19          * Add countries information to the training set, that are, code, EU, EEA properties
+20          * for samparea, origcountry... These information are needed to compute the country
+21          * distances during the pairs comparisons, since we need to check eu/eea properties
+22          * of countries.
+23          */
+24         
+25         /* Retrieve countries properties using their ids */
+26         data myLib.COUNTRY_CODES(keep=ID ORIGCOUNTRY PROCCOUNTRY LABCOUNTRY LOCALORGCOUNTRY);
+27         	set &trn_table;
+28         run;
+
+NOTE: There were 1425471 observations read from the data set MYLIB.TRN_SET_2015.
+NOTE: The data set MYLIB.COUNTRY_CODES has 1425471 observations and 5 variables.
+NOTE: Compressing data set MYLIB.COUNTRY_CODES decreased size by 8.44 percent. 
+      Compressed is 12923 pages; un-compressed would require 14114 pages.
+NOTE: DATA statement used (Total process time):
+      real time           1:39.37
+      cpu time            12.93 seconds
+      
+
+29         
+30         /**
+31         * Add the country code eu eea information for a country variable of the SSD1 to the output_table
+32         */
+33         %macro addCountryInfo(country_cat /*table which contains the country catalogue*/,
+34         	output_table /*table which will contain the country info, should contain also the var_name variable*/,
+35         	var_name /*variable of output_table which is a country id*/);
+36         	
+37         	/* Sort country cat by id for merge statement */
+38         	proc sort data=&country_cat;
+39         		by ID;
+40         	run;
+41         
+42         	/* sort output by the var */
+43         	proc sort data=&output_table;
+44         		by &var_name;
+45         	run;
+46         
+47         	/* merge and add code eu eea */
+48         	data &output_table;
+49         		merge &country_cat(rename=(ID = &var_name
+50         								CODE = &var_name.CODE
+51         								MEMBEROFEU = &var_name.EU
+52         								MEMBEROFEEA = &var_name.EEA)) &output_table(IN=in);
+53         		by &var_name;
+54         		if in then output;
+55         	run;
+2                                                       The SAS System                         14:08 Wednesday, August 30, 2017
+
+56         %mend;
+57         
+58         /* Add all the country info */
+59         %addCountryInfo(&country_cat, myLib.COUNTRY_CODES, ORIGCOUNTRY);
+
+NOTE: Input data set is already sorted, no sorting done.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           0.03 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 1425471 observations read from the data set MYLIB.COUNTRY_CODES.
+NOTE: The data set MYLIB.COUNTRY_CODES has 1425471 observations and 5 variables.
+NOTE: Compressing data set MYLIB.COUNTRY_CODES decreased size by 8.37 percent. 
+      Compressed is 12932 pages; un-compressed would require 14114 pages.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           13.57 seconds
+      cpu time            2.99 seconds
+      
+
+
+NOTE: There were 256 observations read from the data set MYLIB.CAT2_COUNTRY.
+NOTE: There were 1425471 observations read from the data set MYLIB.COUNTRY_CODES.
+NOTE: The data set MYLIB.COUNTRY_CODES has 1425471 observations and 8 variables.
+NOTE: Compressing data set MYLIB.COUNTRY_CODES decreased size by 59.16 percent. 
+      Compressed is 8689 pages; un-compressed would require 21276 pages.
+NOTE: DATA statement used (Total process time):
+      real time           14.39 seconds
+      cpu time            3.72 seconds
+      
+
+60         %addCountryInfo(&country_cat, myLib.COUNTRY_CODES, PROCCOUNTRY);
+
+NOTE: Input data set is already sorted, no sorting done.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 1425471 observations read from the data set MYLIB.COUNTRY_CODES.
+NOTE: The data set MYLIB.COUNTRY_CODES has 1425471 observations and 8 variables.
+NOTE: Compressing data set MYLIB.COUNTRY_CODES decreased size by 59.15 percent. 
+      Compressed is 8691 pages; un-compressed would require 21276 pages.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           13.50 seconds
+      cpu time            3.63 seconds
+      
+
+
+NOTE: There were 256 observations read from the data set MYLIB.CAT2_COUNTRY.
+NOTE: There were 1425471 observations read from the data set MYLIB.COUNTRY_CODES.
+NOTE: The data set MYLIB.COUNTRY_CODES has 1425471 observations and 11 variables.
+NOTE: Compressing data set MYLIB.COUNTRY_CODES decreased size by 67.47 percent. 
+      Compressed is 7360 pages; un-compressed would require 22627 pages.
+NOTE: DATA statement used (Total process time):
+      real time           14.56 seconds
+      cpu time            3.35 seconds
+      
+
+61         %addCountryInfo(&country_cat, myLib.COUNTRY_CODES, LABCOUNTRY);
+
+NOTE: Input data set is already sorted, no sorting done.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.00 seconds
+      
+3                                                       The SAS System                         14:08 Wednesday, August 30, 2017
+
+
+
+NOTE: There were 1425471 observations read from the data set MYLIB.COUNTRY_CODES.
+NOTE: The data set MYLIB.COUNTRY_CODES has 1425471 observations and 11 variables.
+NOTE: Compressing data set MYLIB.COUNTRY_CODES decreased size by 67.47 percent. 
+      Compressed is 7361 pages; un-compressed would require 22627 pages.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           11.68 seconds
+      cpu time            3.50 seconds
+      
+
+
+NOTE: There were 256 observations read from the data set MYLIB.CAT2_COUNTRY.
+NOTE: There were 1425471 observations read from the data set MYLIB.COUNTRY_CODES.
+NOTE: The data set MYLIB.COUNTRY_CODES has 1425471 observations and 14 variables.
+NOTE: Compressing data set MYLIB.COUNTRY_CODES decreased size by 72.73 percent. 
+      Compressed is 8638 pages; un-compressed would require 31678 pages.
+NOTE: DATA statement used (Total process time):
+      real time           15.28 seconds
+      cpu time            4.04 seconds
+      
+
+62         %addCountryInfo(&country_cat, myLib.COUNTRY_CODES, LOCALORGCOUNTRY);
+
+NOTE: Input data set is already sorted, no sorting done.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           0.01 seconds
+      cpu time            0.00 seconds
+      
+
+
+NOTE: There were 1425471 observations read from the data set MYLIB.COUNTRY_CODES.
+NOTE: The data set MYLIB.COUNTRY_CODES has 1425471 observations and 14 variables.
+NOTE: Compressing data set MYLIB.COUNTRY_CODES decreased size by 72.73 percent. 
+      Compressed is 8638 pages; un-compressed would require 31678 pages.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           14.85 seconds
+      cpu time            4.50 seconds
+      
+
+
+NOTE: There were 256 observations read from the data set MYLIB.CAT2_COUNTRY.
+NOTE: There were 1425471 observations read from the data set MYLIB.COUNTRY_CODES.
+NOTE: The data set MYLIB.COUNTRY_CODES has 1425471 observations and 17 variables.
+NOTE: Compressing data set MYLIB.COUNTRY_CODES decreased size by 74.99 percent. 
+      Compressed is 7586 pages; un-compressed would require 30330 pages.
+NOTE: DATA statement used (Total process time):
+      real time           16.63 seconds
+      cpu time            4.04 seconds
+      
+
+63         
+64         /* merge with training set */
+65         proc sort data=myLib.COUNTRY_CODES;
+66         	by ID;
+67         run;
+
+NOTE: There were 1425471 observations read from the data set MYLIB.COUNTRY_CODES.
+NOTE: The data set MYLIB.COUNTRY_CODES has 1425471 observations and 17 variables.
+NOTE: Compressing data set MYLIB.COUNTRY_CODES decreased size by 75.00 percent. 
+      Compressed is 7582 pages; un-compressed would require 30330 pages.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           15.17 seconds
+      cpu time            4.21 seconds
+      
+
+68         proc sort data=&trn_table;
+69         	by ID;
+4                                                       The SAS System                         14:08 Wednesday, August 30, 2017
+
+70         run;
+
+NOTE: There were 1425471 observations read from the data set MYLIB.TRN_SET_2015.
+NOTE: The data set MYLIB.TRN_SET_2015 has 1425471 observations and 118 variables.
+NOTE: Compressing data set MYLIB.TRN_SET_2015 decreased size by 93.13 percent. 
+      Compressed is 97975 pages; un-compressed would require 1425471 pages.
+NOTE: PROCEDURE SORT used (Total process time):
+      real time           3:09.52
+      cpu time            1:35.34
+      
+
+71         data &trn_table;
+72         	merge &trn_table myLib.COUNTRY_CODES;
+73         	by ID;
+74         run;
+
+NOTE: MERGE statement has more than one data set with repeats of BY values.
+NOTE: There were 1425471 observations read from the data set MYLIB.TRN_SET_2015.
+NOTE: There were 1425471 observations read from the data set MYLIB.COUNTRY_CODES.
+NOTE: The data set MYLIB.TRN_SET_2015 has 1425471 observations and 130 variables.
+NOTE: Compressing data set MYLIB.TRN_SET_2015 decreased size by 92.78 percent. 
+      Compressed is 102868 pages; un-compressed would require 1425473 pages.
+NOTE: DATA statement used (Total process time):
+      real time           3:33.22
+      cpu time            54.07 seconds
+      
+
+75         
+76         /* drop useless tables */
+77         proc sql;
+78         	drop table myLib.COUNTRY_CODES;
+NOTE: Table MYLIB.COUNTRY_CODES has been dropped.
+79         run;
+NOTE: PROC SQL statements are executed immediately; The RUN statement has no effect.
+80         
+81         GOPTIONS NOACCESSIBLE;
+82         %LET _CLIENTTASKLABEL=;
+83         %LET _CLIENTPROJECTPATH=;
+84         %LET _CLIENTPROJECTNAME=;
+85         %LET _SASPROGRAMFILE=;
+86         
+87         ;*';*";*/;quit;
+NOTE: PROCEDURE SQL used (Total process time):
+      real time           0.03 seconds
+      cpu time            0.01 seconds
+      
+87       !                run;
+
+88         ODS _ALL_ CLOSE;
+89         
+90         
+91         QUIT; RUN;
+92         
