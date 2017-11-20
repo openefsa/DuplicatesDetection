@@ -1,2 +1,2 @@
 # DuplicatesDetection
-Project used to extract and create a training set with SAS.
+SAS project to detect DWH duplicates. The algorithm is customizable using settings.
